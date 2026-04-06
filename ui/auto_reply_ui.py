@@ -9,7 +9,7 @@ from qfluentwidgets import (CardWidget, SubtitleLabel, CaptionLabel, BodyLabel,
                            PrimaryPushButton, PushButton, StrongBodyLabel, 
                            InfoBadge, ScrollArea, FluentIcon as FIF)
 from database.db_manager import db_manager
-from utils.logger import get_logger
+from utils.logger_loguru import get_logger
 from Channel.pinduoduo.utils.API.Set_up_online import AccountMonitor
 import threading
 from typing import Dict, Optional
@@ -120,9 +120,48 @@ class AutoReplyManager:
             return False
     
     def is_running(self, account_data: dict) -> bool:
-        """检查账号是否正在自动回复"""
-        account_key = f"{account_data['channel_name']}_{account_data['shop_id']}_{account_data['username']}"
-        return account_key in self.running_accounts and self.running_accounts[account_key].is_running()
+        """检查账号是否正在自动回复（改进版本）"""
+        try:
+            account_key = f"{account_data['channel_name']}_{account_data['shop_id']}_{account_data['username']}"
+
+            # 检查是否在运行列表中
+            if account_key not in self.running_accounts:
+                return False
+
+            thread = self.running_accounts[account_key]
+
+            # 检查线程是否存在且正在运行
+            if not thread or not hasattr(thread, 'isRunning'):
+                # 清理无效的线程引用，但不要过于频繁地清理
+                self._cleanup_stale_thread(account_key)
+                return False
+
+            # 检查线程是否正在运行
+            is_thread_running = thread.isRunning()
+
+            # 如果线程已停止，清理引用
+            if not is_thread_running:
+                self._cleanup_stale_thread(account_key)
+                return False
+
+            # 线程正在运行，认为账号正在自动回复
+            return True
+
+        except Exception as e:
+            self.logger.error(f"检查账号运行状态失败: {str(e)}")
+            return False
+
+    def _cleanup_stale_thread(self, account_key: str):
+        """清理已停止的线程引用"""
+        try:
+            if account_key in self.running_accounts:
+                thread = self.running_accounts[account_key]
+                # 只有在线程确实停止后才清理
+                if hasattr(thread, 'isRunning') and not thread.isRunning():
+                    del self.running_accounts[account_key]
+                    self.logger.debug(f"清理已停止的线程引用: {account_key}")
+        except Exception as e:
+            self.logger.error(f"清理线程引用失败: {account_key}, {e}")
     
     def _on_connection_success(self, account_key: str):
         """连接成功回调"""
@@ -206,8 +245,8 @@ class AutoReplyThread(QThread):
                 )
             )
             
-            # 运行事件循环直到任务完成
-            self.loop.run_until_complete(task)
+            # 保持事件循环运行，直到显式停止
+            self.loop.run_forever()
 
         except Exception as e:
             self.logger.error(f"自动回复线程启动失败: {e}")
@@ -222,6 +261,14 @@ class AutoReplyThread(QThread):
         try:
             if self.channel:
                 self.channel.request_stop()
+
+            # 停止事件循环（如果存在）
+            if hasattr(self, 'loop') and self.loop:
+                if self.loop.is_running():
+                    for task in asyncio.all_tasks(self.loop):
+                        if not task.done():
+                            task.cancel()
+                    self.loop.call_soon_threadsafe(self.loop.stop)
 
         except Exception as e:
             self.logger.error(f"停止自动回复线程失败: {e}")
@@ -526,10 +573,11 @@ class AutoReplyCard(CardWidget):
     def loadLogo(self):
         """异步加载Logo"""
         if self.shop_logo:
-            # 创建并启动Logo加载线程
-            self.logo_loader_thread = LogoLoaderThread(self.shop_logo)
-            self.logo_loader_thread.logo_loaded.connect(self.setLogo)
-            self.logo_loader_thread.start()
+            def _start():
+                self.logo_loader_thread = LogoLoaderThread(self.shop_logo)
+                self.logo_loader_thread.logo_loaded.connect(self.setLogo)
+                self.logo_loader_thread.start()
+            QTimer.singleShot(200, _start)
         else:
             self.logo_label.setText("无Logo")
 
@@ -546,15 +594,43 @@ class AutoReplyUI(QFrame):
     
     def __init__(self, parent=None):
         super().__init__(parent=parent)
+        self.logger = get_logger()  # 初始化logger（必须在其他操作之前）
         self.accounts_data = []  # 存储账号数据
+        self._loaded_once = False
         self.setupUI()
-        self.loadAccountsFromDB()
-        
+        QTimer.singleShot(300, self._maybeLoadOnShow)
+
         # 设置定时器定期更新统计信息
         self.stats_timer = QTimer()
         self.stats_timer.timeout.connect(self.updateStats)
         self.stats_timer.start(5000)  # 每5秒更新一次
-        self.logger = get_logger()
+
+        # 设置定时器定期同步自动回复状态（减少检查频率，避免过度同步）
+        self.sync_timer = QTimer()
+        self.sync_timer.timeout.connect(self._sync_auto_reply_status)
+        self.sync_timer.start(10000)  # 每10秒同步一次状态（减少频率）
+
+    def closeEvent(self, event):
+        """窗口关闭时清理定时器"""
+        try:
+            if hasattr(self, 'stats_timer'):
+                self.stats_timer.stop()
+            if hasattr(self, 'sync_timer'):
+                self.sync_timer.stop()
+            event.accept()
+        except Exception as e:
+            self.logger.error(f"清理定时器失败: {e}")
+            event.accept()
+    
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._maybeLoadOnShow()
+    
+    def _maybeLoadOnShow(self):
+        if not self._loaded_once and self.isVisible():
+            self._loaded_once = True
+            self.loadAccountsFromDB()
+
     def setupUI(self):
         """设置主界面UI"""
         # 主布局
@@ -721,27 +797,36 @@ class AutoReplyUI(QFrame):
         """刷新账号列表"""
         # 清空现有卡片
         self.clearAccountList()
-        
+
         # 添加账号卡片
         for account_data in self.accounts_data:
             account_card = AutoReplyCard(account_data)
-            
+
             # 连接卡片信号
             account_card.online_clicked.connect(self.onAccountOnline)
             account_card.offline_clicked.connect(self.onAccountOffline)
             account_card.auto_reply_clicked.connect(self.onAutoReplyToggle)
-            
-            # 检查并设置自动回复状态
-            if auto_reply_manager.is_running(account_data):
-                account_card.setAutoReplyStatus(True)
-            
+
+            # 检查并设置自动回复状态（改进的状态检查）
+            account_key = f"{account_data['channel_name']}_{account_data['shop_id']}_{account_data['username']}"
+            is_running = auto_reply_manager.is_running(account_data)
+
+            # 记录状态检查的调试信息
+            self.logger.debug(f"账号 {account_data['username']} 状态检查: key={account_key}, running={is_running}")
+
+            # 设置自动回复状态
+            account_card.setAutoReplyStatus(is_running)
+
             self.accounts_layout.addWidget(account_card)
-        
+
         # 添加弹性空间
         self.accounts_layout.addStretch()
-        
+
         # 更新统计信息
         self.updateStats()
+
+        # 额外的状态同步：延迟一点时间再次检查并更新
+        QTimer.singleShot(2000, self._sync_auto_reply_status)  # 增加延迟时间，让初始化更稳定
     
     def clearAccountList(self):
         """清空账号列表"""
@@ -756,6 +841,42 @@ class AutoReplyUI(QFrame):
         running_count = auto_reply_manager.get_running_count()
         self.stats_label.setText(f"共 {count} 个账号")
         self.running_stats_label.setText(f"运行中: {running_count} 个")
+
+    def _sync_auto_reply_status(self):
+        """同步自动回复状态（优化版本，减少误判）"""
+        try:
+            updated_count = 0
+
+            for i in range(self.accounts_layout.count() - 1):  # -1 因为最后一个是stretch
+                widget = self.accounts_layout.itemAt(i).widget()
+                if isinstance(widget, AutoReplyCard):
+                    # 重新检查实际的运行状态
+                    is_running = auto_reply_manager.is_running(widget.account_data)
+                    current_status = widget.auto_reply_status
+
+                    # 只有在状态真正不一致时才更新UI
+                    if is_running != current_status:
+                        # 额外检查：如果是运行中变为停止，需要确认线程真的停止了
+                        if current_status and not is_running:
+                            # 再次检查，确保不是误判
+                            account_key = f"{widget.account_data['channel_name']}_{widget.account_data['shop_id']}_{widget.account_data['username']}"
+                            if account_key in auto_reply_manager.running_accounts:
+                                thread = auto_reply_manager.running_accounts[account_key]
+                                if hasattr(thread, 'isRunning') and thread.isRunning():
+                                    # 线程还在运行，不更新状态
+                                    continue
+
+                        self.logger.info(f"同步状态: {widget.account_data['username']} 从 {current_status} 更新为 {is_running}")
+                        widget.setAutoReplyStatus(is_running)
+                        updated_count += 1
+
+            if updated_count > 0:
+                self.logger.info(f"状态同步完成，更新了 {updated_count} 个账号的状态")
+                # 再次更新统计信息
+                self.updateStats()
+
+        except Exception as e:
+            self.logger.error(f"同步自动回复状态失败: {str(e)}")
     
     def reloadAccounts(self):
         """重新加载账号"""

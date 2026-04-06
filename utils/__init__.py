@@ -5,6 +5,6 @@
 工具模块包
 """
 
-from utils.logger import logger
+from utils.logger_loguru import logger
 
 __all__ = ["logger"] 

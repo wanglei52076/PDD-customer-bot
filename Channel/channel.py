@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from database import db_manager
-from utils.logger import get_logger
+from utils.logger_loguru import get_logger
 
 class Channel:
     """

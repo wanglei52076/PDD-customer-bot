@@ -1,59 +1,49 @@
-# Python 缓存文件
 __pycache__
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# 测试文件夹
-test/
-/user_data/
-# 配置文件（可能包含敏感信息）
-config.json
-cookies.json
-conversations.db
-# 日志文件
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.exe
+*.spec
+!scripts/*.spec
+browser_data/*
 *.log
-
-# 数据库文件
-*.db
-*.sqlite
-*.sqlite3
-
-# 环境文件
-.env
+examples/
+logs/
+dist
+build
 .venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+user_data/
+*.db
+*.db
+config.json
+temp/
+.claude/
 
-# IDE 配置
+# Backup directories
+backup/
+*.backup
+.bak/
+
+# Serena project files
+.serena/
+
+# Temporary and cache files
+temp/
+tmp/
+*.tmp
+*.temp
+
+# IDE and editor files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# 操作系统生成的文件
+# OS generated files
 .DS_Store
 .DS_Store?
 ._*
@@ -62,7 +52,6 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-CLAUDE.md
-.claude/
+.DS_Store
 .spec-workflow/
-.serena/
+chroma_db/

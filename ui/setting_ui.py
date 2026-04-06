@@ -12,74 +12,276 @@ from qfluentwidgets import (CardWidget, SubtitleLabel, CaptionLabel, BodyLabel,
                            InfoBar, InfoBarPosition, TextEdit, PasswordLineEdit,
                            TimePicker)
 from PyQt6.QtCore import QTime
-from utils.logger import get_logger
+from utils.logger_loguru import get_logger
 from config import config
 
 
-class CozeConfigCard(CardWidget):
-    """Coze配置卡片"""
-    
+
+
+class LLMConfigCard(CardWidget):
+    """LLM配置卡片"""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUI()
-    
+
     def setupUI(self):
         """设置UI"""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(16)
-        
+
         # 卡片标题
-        title_label = StrongBodyLabel("Coze AI 配置")
+        title_label = StrongBodyLabel("LLM模型配置")
         title_label.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
         layout.addWidget(title_label)
-        
+
         # 表单布局
         form_layout = QFormLayout()
         form_layout.setSpacing(12)
         form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         form_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
-        
+
         # API Base URL
         self.api_base_edit = LineEdit()
-        self.api_base_edit.setPlaceholderText("https://api.coze.cn")
-        self.api_base_edit.setText("https://api.coze.cn")
+        self.api_base_edit.setPlaceholderText("https://ark.cn-beijing.volces.com/api/v3")
+        self.api_base_edit.setText("https://ark.cn-beijing.volces.com/api/v3")
         form_layout.addRow("API Base URL:", self.api_base_edit)
-        
-        # API Token
-        self.api_token_edit = PasswordLineEdit()
-        self.api_token_edit.setPlaceholderText("输入您的 Coze API Token")
-        form_layout.addRow("API Token:", self.api_token_edit)
-        
-        # Bot ID
-        self.bot_id_edit = LineEdit()
-        self.bot_id_edit.setPlaceholderText("输入您的 Bot ID")
-        form_layout.addRow("Bot ID:", self.bot_id_edit)
-                
+
+        # API Key
+        self.api_key_edit = PasswordLineEdit()
+        self.api_key_edit.setPlaceholderText("输入您的 API Key")
+        form_layout.addRow("API Key:", self.api_key_edit)
+
+        # Model Name
+        self.model_name_edit = LineEdit()
+        self.model_name_edit.setPlaceholderText("输入模型名称，如：doubao-seed-1-6-flash-250828")
+        form_layout.addRow("模型名称:", self.model_name_edit)
+
         layout.addLayout(form_layout)
-        
+
         # 说明文本
         description_label = CaptionLabel(
-            "请在 Coze 平台获取您的 API Token 和 Bot ID。\n"
-            "API Token 用于身份验证，Bot ID 用于指定使用的特定机器人。"
+            "配置LLM模型的连接参数。\n"
+            "支持OpenAI兼容的API接口，包括豆包、通义千问等模型。"
         )
         description_label.setStyleSheet("color: #666; padding: 8px 0;")
         layout.addWidget(description_label)
-    
+
     def getConfig(self) -> dict:
         """获取配置"""
         return {
-            "coze_api_base": self.api_base_edit.text().strip() or "https://api.coze.cn",
-            "coze_token": self.api_token_edit.text().strip(),
-            "coze_bot_id": self.bot_id_edit.text().strip()
+            "api_base": self.api_base_edit.text().strip() or "https://ark.cn-beijing.volces.com/api/v3",
+            "api_key": self.api_key_edit.text().strip(),
+            "model_name": self.model_name_edit.text().strip()
         }
-    
+
     def setConfig(self, config: dict):
         """设置配置"""
-        self.api_base_edit.setText(config.get("coze_api_base", "https://api.coze.cn"))
-        self.api_token_edit.setText(config.get("coze_token", ""))
-        self.bot_id_edit.setText(config.get("coze_bot_id", ""))
+        self.api_base_edit.setText(config.get("api_base", "https://ark.cn-beijing.volces.com/api/v3"))
+        self.api_key_edit.setText(config.get("api_key", ""))
+        self.model_name_edit.setText(config.get("model_name", ""))
+
+
+class EmbedderConfigCard(CardWidget):
+    """嵌入器配置卡片"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setupUI()
+
+    def setupUI(self):
+        """设置UI"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(16)
+
+        # 卡片标题
+        title_label = StrongBodyLabel("嵌入模型配置")
+        title_label.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
+        layout.addWidget(title_label)
+
+        # 表单布局
+        form_layout = QFormLayout()
+        form_layout.setSpacing(12)
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        # Embedder API Base URL
+        self.api_base_edit = LineEdit()
+        self.api_base_edit.setPlaceholderText("https://ark.cn-beijing.volces.com/api/v3")
+        form_layout.addRow("API Base URL:", self.api_base_edit)
+
+        # Embedder API Key
+        self.api_key_edit = PasswordLineEdit()
+        self.api_key_edit.setPlaceholderText("输入嵌入模型的 API Key（可选）")
+        form_layout.addRow("API Key:", self.api_key_edit)
+
+        # Embedder Model Name
+        self.model_name_edit = LineEdit()
+        self.model_name_edit.setPlaceholderText("输入嵌入模型名称，如：doubao-embedding-large-text-250515")
+        form_layout.addRow("模型名称:", self.model_name_edit)
+
+        layout.addLayout(form_layout)
+
+        # 说明文本
+        description_label = CaptionLabel(
+            "配置向量嵌入模型参数。\n"
+            "用于知识库的语义搜索和相似度匹配。"
+        )
+        description_label.setStyleSheet("color: #666; padding: 8px 0;")
+        layout.addWidget(description_label)
+
+    def getConfig(self) -> dict:
+        """获取配置"""
+        return {
+            "api_base": self.api_base_edit.text().strip() or "https://ark.cn-beijing.volces.com/api/v3",
+            "api_key": self.api_key_edit.text().strip(),
+            "model_name": self.model_name_edit.text().strip()
+        }
+
+    def setConfig(self, config: dict):
+        """设置配置"""
+        self.api_base_edit.setText(config.get("api_base", "https://ark.cn-beijing.volces.com/api/v3"))
+        self.api_key_edit.setText(config.get("api_key", ""))
+        self.model_name_edit.setText(config.get("model_name", ""))
+
+
+class KnowledgeConfigCard(CardWidget):
+    """知识库配置卡片"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setupUI()
+
+    def setupUI(self):
+        """设置UI"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(16)
+
+        # 卡片标题
+        title_label = StrongBodyLabel("知识库配置")
+        title_label.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
+        layout.addWidget(title_label)
+
+        # 表单布局
+        form_layout = QFormLayout()
+        form_layout.setSpacing(12)
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        # Contents DB Path
+        self.contents_db_edit = LineEdit()
+        self.contents_db_edit.setPlaceholderText("内容数据库路径")
+        form_layout.addRow("内容数据库路径:", self.contents_db_edit)
+
+        # Vector DB Path
+        self.vector_db_edit = LineEdit()
+        self.vector_db_edit.setPlaceholderText("向量数据库路径")
+        form_layout.addRow("向量数据库路径:", self.vector_db_edit)
+
+        layout.addLayout(form_layout)
+
+        # 说明文本
+        description_label = CaptionLabel(
+            "配置知识库的存储路径。\n"
+            "内容数据库存储结构化数据，向量数据库存储嵌入向量。"
+        )
+        description_label.setStyleSheet("color: #666; padding: 8px 0;")
+        layout.addWidget(description_label)
+
+    def getConfig(self) -> dict:
+        """获取配置"""
+        return {
+            "contents_db_path": self.contents_db_edit.text().strip(),
+            "vector_db_path": self.vector_db_edit.text().strip()
+        }
+
+    def setConfig(self, config: dict):
+        """设置配置"""
+        self.contents_db_edit.setText(config.get("contents_db_path", ""))
+        self.vector_db_edit.setText(config.get("vector_db_path", ""))
+
+
+class PromptConfigCard(CardWidget):
+    """提示词配置卡片"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setupUI()
+
+    def setupUI(self):
+        """设置UI"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(16)
+
+        # 卡片标题
+        title_label = StrongBodyLabel("AI提示词配置")
+        title_label.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
+        layout.addWidget(title_label)
+
+        # 表单布局
+        form_layout = QFormLayout()
+        form_layout.setSpacing(12)
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        # 角色描述
+        self.description_edit = TextEdit()
+        self.description_edit.setPlaceholderText(
+            "输入AI助手的角色描述，如：你是一个专业的电商客服助手..."
+        )
+        self.description_edit.setMaximumHeight(100)
+        form_layout.addRow("角色描述:", self.description_edit)
+
+        # 额外提示词
+        self.additional_context_edit = TextEdit()
+        self.additional_context_edit.setPlaceholderText(
+            "输入额外的提示词或上下文信息..."
+        )
+        self.additional_context_edit.setMaximumHeight(100)
+        form_layout.addRow("额外提示词:", self.additional_context_edit)
+
+        self.instructions_edit = TextEdit()
+        self.instructions_edit.setPlaceholderText("输入行为指令，每行一条")
+        self.instructions_edit.setMaximumHeight(120)
+        form_layout.addRow("行为指令:", self.instructions_edit)
+
+        layout.addLayout(form_layout)
+
+        # 说明文本
+        description_label = CaptionLabel(
+            "配置AI助手的行为和回复风格。\n"
+            "清晰的提示词可以帮助AI提供更准确和有用的回复。"
+        )
+        description_label.setStyleSheet("color: #666; padding: 8px 0;")
+        layout.addWidget(description_label)
+
+    def getConfig(self) -> dict:
+        """获取配置"""
+        return {
+            "description": self.description_edit.toPlainText().strip(),
+            "additional_context": self.additional_context_edit.toPlainText().strip(),
+            "instructions": [
+                line.strip() for line in self.instructions_edit.toPlainText().splitlines() if line.strip()
+            ]
+        }
+
+    def setConfig(self, config: dict):
+        """设置配置"""
+        self.description_edit.setPlainText(config.get("description", ""))
+        self.additional_context_edit.setPlainText(config.get("additional_context", ""))
+        instructions = config.get("instructions", [])
+        if isinstance(instructions, list):
+            self.instructions_edit.setPlainText("\n".join(instructions))
+        elif isinstance(instructions, str):
+            self.instructions_edit.setPlainText(instructions)
 
 
 class BusinessHoursCard(CardWidget):
@@ -133,19 +335,24 @@ class BusinessHoursCard(CardWidget):
             "businessHours": {
                 "start": self.start_time_picker.getTime().toString("HH:mm"),
                 "end": self.end_time_picker.getTime().toString("HH:mm")
+            },
+            "business_hours": {
+                "start": self.start_time_picker.getTime().toString("HH:mm"),
+                "end": self.end_time_picker.getTime().toString("HH:mm")
             }
         }
     
     def setConfig(self, config: dict):
         """设置配置"""
-        business_hours = config.get("businessHours", {})
-        
+        # 支持新旧配置格式
+        business_hours = config.get("businessHours", config.get("business_hours", {}))
+
         # 解析开始时间
         start_time_str = business_hours.get("start", "08:00")
         start_time = QTime.fromString(start_time_str, "HH:mm")
         if start_time.isValid():
             self.start_time_picker.setTime(start_time)
-        
+
         # 解析结束时间
         end_time_str = business_hours.get("end", "23:00")
         end_time = QTime.fromString(end_time_str, "HH:mm")
@@ -242,7 +449,7 @@ class SettingUI(QFrame):
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        
+
         # 去除边框
         scroll_area.setStyleSheet("""
             ScrollArea {
@@ -250,23 +457,29 @@ class SettingUI(QFrame):
                 background-color: transparent;
             }
         """)
-        
+
         # 内容容器
         content_container = QWidget()
         content_layout = QVBoxLayout(content_container)
         content_layout.setSpacing(20)
         content_layout.setContentsMargins(20, 20, 20, 20)
         content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        
+
         # 创建配置卡片
-        self.coze_config_card = CozeConfigCard()
+        self.llm_config_card = LLMConfigCard()
+        self.embedder_config_card = EmbedderConfigCard()
+        self.knowledge_config_card = KnowledgeConfigCard()
+        self.prompt_config_card = PromptConfigCard()
         self.business_hours_card = BusinessHoursCard()
-        
+
         # 添加到布局
-        content_layout.addWidget(self.coze_config_card)
+        content_layout.addWidget(self.llm_config_card)
+        content_layout.addWidget(self.embedder_config_card)
+        content_layout.addWidget(self.knowledge_config_card)
+        content_layout.addWidget(self.prompt_config_card)
         content_layout.addWidget(self.business_hours_card)
         content_layout.addStretch()
-        
+
         # 设置容器样式
         content_container.setStyleSheet("""
             QWidget {
@@ -274,25 +487,45 @@ class SettingUI(QFrame):
                 border: none;
             }
         """)
-        
+
         scroll_area.setWidget(content_container)
-        
+
         return scroll_area
     
     def loadConfig(self):
         """从config模块加载配置"""
-        try:            
+        try:
+            # 从配置模块获取各个配置项
             loaded_config = {
-                "coze_api_base": config.get("coze_api_base", "https://api.coze.cn"),
-                "coze_token": config.get("coze_token", ""),
-                "coze_bot_id": config.get("coze_bot_id", ""),
-                "businessHours": config.get("businessHours", {"start": "08:00", "end": "23:00"})
+                "llm": {
+                    "api_base": config.get("llm.api_base", "https://ark.cn-beijing.volces.com/api/v3"),
+                    "api_key": config.get("llm.api_key", ""),
+                    "model_name": config.get("llm.model_name", "doubao-seed-1-6-flash-250828")
+                },
+                "embedder": {
+                    "api_base": config.get("embedder.api_base", "https://ark.cn-beijing.volces.com/api/v3"),
+                    "api_key": config.get("embedder.api_key", ""),
+                    "model_name": config.get("embedder.model_name", "doubao-embedding-large-text-250515")
+                },
+                "knowledge_base": {
+                    "contents_db_path": config.get("knowledge_base.contents_db_path", ""),
+                    "vector_db_path": config.get("knowledge_base.vector_db_path", "")
+                },
+                "prompt": {
+                    "description": config.get("prompt.description", ""),
+                    "additional_context": config.get("prompt.additional_context", ""),
+                    "instructions": config.get("prompt.instructions", [])
+                },
+                "business_hours": {
+                    "start": config.get("business_hours.start", "08:00"),
+                    "end": config.get("business_hours.end", "23:00")
+                }
             }
-            
+
             # 验证并设置配置
             self._validateAndSetConfig(loaded_config)
             self.logger.info("配置加载成功")
-            
+
         except Exception as e:
             self.logger.error(f"加载配置失败: {e}")
             QMessageBox.warning(self, "加载失败", f"加载配置失败：{str(e)}")
@@ -301,76 +534,126 @@ class SettingUI(QFrame):
     def _loadDefaultConfig(self):
         """加载默认配置"""
         default_config = {
-            "coze_api_base": "https://api.coze.cn",
-            "coze_token": "",
-            "coze_bot_id": "",
-            "businessHours": {
+            "llm": {
+                "api_base": "https://ark.cn-beijing.volces.com/api/v3",
+                "api_key": "",
+                "model_name": "doubao-seed-1-6-flash-250828"
+            },
+            "embedder": {
+                "api_base": "https://ark.cn-beijing.volces.com/api/v3",
+                "api_key": "",
+                "model_name": "doubao-embedding-large-text-250515"
+            },
+            "knowledge_base": {
+                "contents_db_path": "",
+                "vector_db_path": ""
+            },
+            "prompt": {
+                "description": "你是一个专业的电商客服助手，负责为拼多多店铺提供优质的客户服务。请遵循以下原则：\n\n1. 友好专业：始终保持礼貌、耐心和专业的态度\n2. 准确回答：根据客户问题提供准确、有用的信息\n3. 主动服务：主动了解客户需求，提供个性化建议\n4. 及时响应：快速响应客户咨询，提高服务效率\n5. 问题解决：积极帮助客户解决购物和售后问题",
+                "additional_context": "请用简洁明了的语言回复，避免过长的回答。如果遇到无法解决的复杂问题，请礼貌地建议客户联系人工客服。",
+                "instructions": [
+                    "1. 请用中文回复客户问题",
+                    "2. 如果客户问题超出了你的能力范围，请建议客户联系人工客服"
+                ]
+            },
+            "business_hours": {
                 "start": "08:00",
                 "end": "23:00"
             }
         }
-        
-        self.coze_config_card.setConfig(default_config)
-        self.business_hours_card.setConfig(default_config)
+
+        self._validateAndSetConfig(default_config)
         self.logger.info("已加载默认配置")
-    
+
     def _validateAndSetConfig(self, config_data):
         """验证并设置配置"""
         # 确保必要的字段存在
         validated_config = {
-            "coze_api_base": config_data.get("coze_api_base", "https://api.coze.cn"),
-            "coze_token": config_data.get("coze_token", ""),
-            "coze_bot_id": config_data.get("coze_bot_id", ""),
-            "businessHours": config_data.get("businessHours", {"start": "08:00", "end": "23:00"})
+            "llm": config_data.get("llm", {
+                "api_base": "https://ark.cn-beijing.volces.com/api/v3",
+                "api_key": "",
+                "model_name": "doubao-seed-1-6-flash-250828"
+            }),
+            "embedder": config_data.get("embedder", {
+                "api_base": "https://ark.cn-beijing.volces.com/api/v3",
+                "api_key": "",
+                "model_name": "doubao-embedding-large-text-250515"
+            }),
+            "knowledge_base": config_data.get("knowledge_base", {
+                "contents_db_path": "",
+                "vector_db_path": ""
+            }),
+            "prompt": config_data.get("prompt", {
+                "description": "",
+                "additional_context": "",
+                "instructions": []
+            }),
+            "business_hours": config_data.get("business_hours", {"start": "08:00", "end": "23:00"})
         }
-        
-        # 验证businessHours格式
-        business_hours = validated_config["businessHours"]
+
+        # 验证business_hours格式
+        business_hours = validated_config["business_hours"]
         if not isinstance(business_hours, dict):
             business_hours = {"start": "08:00", "end": "23:00"}
-            validated_config["businessHours"] = business_hours
-        
+            validated_config["business_hours"] = business_hours
+
         if "start" not in business_hours:
             business_hours["start"] = "08:00"
         if "end" not in business_hours:
             business_hours["end"] = "23:00"
-        
+
         # 设置到界面
-        self.coze_config_card.setConfig(validated_config)
-        self.business_hours_card.setConfig(validated_config)
+        self.llm_config_card.setConfig(validated_config["llm"])
+        self.embedder_config_card.setConfig(validated_config["embedder"])
+        self.knowledge_config_card.setConfig(validated_config["knowledge_base"])
+        self.prompt_config_card.setConfig(validated_config["prompt"])
+
+        # 处理业务时间配置
+        business_hours_config = validated_config["business_hours"]
+        self.business_hours_card.setConfig({"business_hours": business_hours_config})
     
     def onSaveConfig(self):
         """保存配置到config模块"""
         try:
-            # 获取配置
-            coze_config = self.coze_config_card.getConfig()
+            # 获取各配置卡片的配置
+            llm_config = self.llm_config_card.getConfig()
+            embedder_config = self.embedder_config_card.getConfig()
+            knowledge_config = self.knowledge_config_card.getConfig()
+            prompt_config = self.prompt_config_card.getConfig()
             business_config = self.business_hours_card.getConfig()
-            
-            # 合并配置
-            new_config = {**coze_config, **business_config}
-            
-            # 验证必填项
-            if not new_config.get("coze_token"):
-                QMessageBox.warning(self, "配置错误", "请输入 Coze API Token！")
+
+            # 合并配置为新的结构
+            new_config = {
+                "llm": llm_config,
+                "embedder": embedder_config,
+                "knowledge_base": knowledge_config,
+                "prompt": prompt_config,
+                "business_hours": business_config.get("businessHours", {"start": "08:00", "end": "23:00"}),
+                # 保持与旧配置的兼容性
+                "db_path": config.get("db_path", "")
+            }
+
+            # 验证 LLM 必填项
+            if not llm_config.get("api_key"):
+                QMessageBox.warning(self, "配置错误", "请输入LLM API Key！")
                 return
-            
-            if not new_config.get("coze_bot_id"):
-                QMessageBox.warning(self, "配置错误", "请输入 Bot ID！")
+            if not llm_config.get("model_name"):
+                QMessageBox.warning(self, "配置错误", "请输入LLM模型名称！")
                 return
-            
+
             # 验证时间设置
             start_time = self.business_hours_card.start_time_picker.getTime()
             end_time = self.business_hours_card.end_time_picker.getTime()
-            
+
             if start_time >= end_time:
                 QMessageBox.warning(self, "时间设置错误", "开始时间必须早于结束时间！")
                 return
-            
+
             # 使用config模块保存配置
             config.update(new_config, save=True)
-            
+
             self.logger.info("配置保存成功")
-            
+
             # 显示成功消息
             InfoBar.success(
                 title="保存成功",
@@ -381,7 +664,7 @@ class SettingUI(QFrame):
                 duration=2000,
                 parent=self
             )
-            
+
         except Exception as e:
             self.logger.error(f"保存配置失败: {e}")
             QMessageBox.critical(self, "保存失败", f"保存配置时发生错误：{str(e)}")

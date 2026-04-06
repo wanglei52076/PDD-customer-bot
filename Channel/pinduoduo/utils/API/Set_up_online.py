@@ -1,4 +1,4 @@
-from .base_request import BaseRequest
+from ..base_request import BaseRequest
 
 
 class AccountMonitor(BaseRequest):

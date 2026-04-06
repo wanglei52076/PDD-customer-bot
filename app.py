@@ -1,37 +1,97 @@
+"""
+应用程序入口点
+
+全局单例初始化顺序（重要）：
+1. config           → 必须在最前面，其他模块都依赖配置
+2. DI 容器           → 通过 configure_standard_services() 统一注册所有服务
+3. db_manager       → 通过 DI 容器获取
+4. logger           → 日志系统，依赖 config
+5. queue_manager    → 通过 DI 容器获取
+6. message_consumer_manager → 通过 DI 容器获取
+7. status_manager   → 通过 DI 容器获取（ConnectionStatusManager 单例）
+8. cache_manager    → 通过 DI 容器获取
+
+关键原则：
+- config 必须最先初始化
+- DI 容器通过 configure_standard_services() 统一管理所有服务的生命周期
+- UI 模块在 main() 中通过延迟加载初始化
+- 业务模块间通过延迟导入（lazy import）避免循环依赖
+- PDDChannel 每个 AutoReplyThread 独立实例，共享 ConnectionStatusManager
+"""
 import sys
 import ctypes
-from PyQt6.QtCore import Qt
+import asyncio
+import os
+from pathlib import Path
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QApplication
 
-from ui.main_ui import MainWindow
-from utils.logger import get_logger
+# ============================================================================
+# 全局单例预初始化（确保正确的初始化顺序）
+# ============================================================================
+# 1. 配置必须最先加载
+from config import config as _app_config
 
-def main():
+# 2. 数据库管理器（通过 DI 代理，懒加载）
+from database import db_manager as _app_db_manager
+
+# 3. 日志系统（依赖配置）
+from utils.logger_loguru import get_logger as _get_logger
+
+# 4. 配置标准服务到 DI 容器（必须在其他业务模块导入前执行）
+from core.di_container import configure_standard_services
+configure_standard_services(_app_config)
+
+# ============================================================================
+
+from ui.main_ui import MainWindow
+import time
+
+# 设置 Playwright 浏览器路径（支持打包后的 exe）
+def get_project_root():
+    """获取项目根目录（支持 PyInstaller 打包后的 exe）"""
+    import sys
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 打包后的 exe
+        return Path(sys._MEIPASS).parent
+    return Path(__file__).resolve().parent
+
+def setup_playwright_browsers_path():
+    """设置 Playwright 浏览器安装路径"""
+    project_root = get_project_root()
+    browsers_path = project_root / ".browsers"
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_path)
+    return browsers_path
+
+async def main():
     """ 应用程序主函数 """
-    logger = get_logger("App")
+    # 设置 Playwright 浏览器路径
+    browsers_path = setup_playwright_browsers_path()
+
+    # 创建应用
+    app = QApplication(sys.argv)
+    app.setApplicationName("Agent-Customer")
+
+    # 创建主窗口
+    logger = _get_logger("App")
     logger.info("应用程序启动...")
 
-    # 启用高分屏支持
-    if hasattr(Qt.ApplicationAttribute, 'AA_EnableHighDpiScaling'):
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling)
-    if hasattr(Qt.ApplicationAttribute, 'AA_UseHighDpiPixmaps'):
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
-
-    app = QApplication(sys.argv)
-    
-    # 在Windows上设置AppUserModelID，以确保任务栏图标正确显示
-    try:
-        if sys.platform == "win32":
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("my.company.my.product.version")
-    except Exception as e:
-        logger.warning(f"设置AppUserModelID失败: {e}")
-
-    # 初始化并显示主窗口
+    t0 = time.perf_counter()
+    t_import = time.perf_counter()
+    from ui.main_ui import MainWindow  # noqa: F401
+    logger.info(f"  MainWindow 模块导入耗时: {time.perf_counter() - t_import:.2f}s")
+    t_window = time.perf_counter()
     window = MainWindow()
     window.show()
+    logger.info(f"  MainWindow 实例化耗时: {time.perf_counter() - t_window:.2f}s")
+    logger.info(f"窗口创建与显示总耗时: {time.perf_counter() - t0:.2f}s")
+
+    # 将窗口设为应用级别的变量，防止被垃圾回收
+    app.main_window = window
+
 
     # 运行事件循环
     sys.exit(app.exec())
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())

@@ -1,4 +1,4 @@
-from .base_request import BaseRequest
+from ..base_request import BaseRequest
 from typing import Dict, Any
 
 
@@ -86,20 +86,49 @@ class SendMessage(BaseRequest):
             return result
 
 
-    def send_mallGoodsCard(self, recipient_uid, goods_id):
+    def send_mallGoodsCard(self, recipient_uid, goods_id, biz_type: int = 2):
         """
         发送商城商品卡片消息
+
+        Args:
+            recipient_uid: 接收消息的用户UID
+            goods_id: 商品ID
+            biz_type: 业务类型，默认2（客服推荐商品）
         """
         url = "https://mms.pinduoduo.com/plateau/message/send/mallGoodsCard"
         data = {
             "uid": recipient_uid,
             "goods_id": goods_id,
-            "biz_type": 3
+            "biz_type": biz_type
         }
 
-        result = self.post(url, json_data=data)
+        # anti-content 从 cookies 中获取（由后端动态生成）
+        anti_content = self.cookies.get('anti_content') or self.cookies.get('anti-content', '')
+
+        # 构建完整请求头
+        headers = {
+            "accept": "application/json, text/plain, */*",
+            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "anti-content": anti_content,
+            "content-type": "application/json;charset=UTF-8",
+            "origin": "https://mms.pinduoduo.com",
+            "priority": "u=1, i",
+            "referer": "https://mms.pinduoduo.com/chat-merchant/index.html",
+            "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        }
+
+        result = self.post(url, json_data=data, headers=headers)
         if result:
-            self.logger.debug(f"发送商城商品卡片消息成功: {result}")
+            if result.get("success"):
+                self.logger.info(f"商品卡片发送成功: goods_id={goods_id}, to={recipient_uid}, biz_type={biz_type}")
+            else:
+                self.logger.error(f"商品卡片发送失败: {result.get('error_msg', '未知错误')}")
             return result
 
 

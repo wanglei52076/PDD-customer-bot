@@ -1,7 +1,9 @@
 from pyclbr import Class
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, create_engine
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, create_engine, DateTime, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
+from datetime import datetime
+import json
 
 Base = declarative_base()
 
@@ -61,9 +63,13 @@ class Account(Base):
 class Keyword(Base):
     """关键词表，存储关键词信息"""
     __tablename__ = 'keywords'
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     keyword = Column(String(100), nullable=False, comment='关键词')
 
     def __repr__(self):
         return f"<Keyword(keyword='{self.keyword}')>"
+
+
+
+

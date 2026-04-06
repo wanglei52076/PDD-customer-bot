@@ -1,7 +1,7 @@
 # 账号管理界面
 
 import asyncio
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSignal as Signal
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSignal as Signal, QTimer
 from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QVBoxLayout, QWidget, QSizePolicy, QLabel,
                             QInputDialog, QMessageBox, QComboBox, QDialog, QFormLayout)
 from PyQt6.QtGui import QFont, QIcon, QPixmap, QPainter, QPainterPath
@@ -10,7 +10,7 @@ from qfluentwidgets import (CardWidget, SubtitleLabel, CaptionLabel, BodyLabel,
                            InfoBadge, ScrollArea, FluentIcon as FIF)
 from database.db_manager import db_manager
 from Channel.pinduoduo.pdd_login import login_pdd
-from utils.logger import get_logger
+from utils.logger_loguru import get_logger
 import requests
 
 logger = get_logger()
@@ -154,10 +154,11 @@ class AccountCard(CardWidget):
     def loadLogo(self):
         """异步加载Logo"""
         if self.shop_logo:
-            # 创建并启动Logo加载线程
-            self.logo_loader_thread = LogoLoaderThread(self.shop_logo)
-            self.logo_loader_thread.logo_loaded.connect(self.setLogo)
-            self.logo_loader_thread.start()
+            def _start():
+                self.logo_loader_thread = LogoLoaderThread(self.shop_logo)
+                self.logo_loader_thread.logo_loaded.connect(self.setLogo)
+                self.logo_loader_thread.start()
+            QTimer.singleShot(200, _start)
         else:
             self.logo_label.setText("无Logo")
 
@@ -325,8 +326,18 @@ class UserManagerWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.accounts_data = []  # 存储账号数据
+        self._loaded_once = False
         self.setupUI()
-        self.loadAccountsFromDB()
+        QTimer.singleShot(300, self._maybeLoadOnShow)
+        
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._maybeLoadOnShow()
+    
+    def _maybeLoadOnShow(self):
+        if not self._loaded_once and self.isVisible():
+            self._loaded_once = True
+            self.loadAccountsFromDB()
         
     def setupUI(self):
         """设置主界面UI"""

@@ -4,11 +4,11 @@
 """
 
 from .base_request import BaseRequest
-from .get_token import GetToken
-from .send_message import SendMessage
-from .get_user_info import GetUserInfo
-from .get_shop_info import GetShopInfo
-from .Set_up_online import AccountMonitor
+from .API.get_token import GetToken
+from .API.send_message import SendMessage
+from .API.get_user_info import GetUserInfo
+from .API.get_shop_info import GetShopInfo
+from .API.Set_up_online import AccountMonitor
 
 __all__ = [
     'BaseRequest',

@@ -1,82 +1,46 @@
 import os
 import json
-import asyncio
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, scoped_session
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Dict, Any, Optional, Union
-from utils.logger import get_logger
-from utils.resource_manager import ThreadResourceManager
+from utils.logger_loguru import get_logger
 from database.models import Base, Channel, Shop, Account, Keyword
 
 class DatabaseManager:
-    """数据库管理类，提供数据库操作的封装 - 优化版本支持连接池"""
+    """数据库管理类，提供数据库操作的封装"""
     _instance = None
-
+    
     def __new__(cls, *args, **kwargs):
         """单例模式实现"""
         if cls._instance is None:
             cls._instance = super(DatabaseManager, cls).__new__(cls)
             cls._instance._initialized = False
         return cls._instance
-
-    def __init__(self, db_path: str = 'database/channel_shop.db', pool_size: int = 10, max_overflow: int = 20):
-        """初始化数据库连接 - 优化版本支持连接池
-
+    
+    def __init__(self, db_path: str = './temp/channel_shop.db'):
+        """初始化数据库连接
+        
         Args:
             db_path: 数据库文件路径
-            pool_size: 连接池大小
-            max_overflow: 连接池溢出大小
         """
         if self._initialized:
             return
-
+            
         # 确保数据库目录存在
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
-
-        # 创建数据库引擎 - 配置连接池
-        self.engine = create_engine(
-            f'sqlite:///{db_path}',
-            poolclass=QueuePool,
-            pool_size=pool_size,
-            max_overflow=max_overflow,
-            pool_pre_ping=True,  # 连接健康检查
-            pool_recycle=3600,   # 连接回收时间（秒）
-            echo=False  # 生产环境关闭SQL日志
-        )
-
-        # 使用scoped_session确保线程安全
-        self.Session = scoped_session(sessionmaker(bind=self.engine))
-
+        
+        # 创建数据库引擎
+        self.engine = create_engine(f'sqlite:///{db_path}')
+        self.Session = sessionmaker(bind=self.engine)
+        
         # 创建表结构
         Base.metadata.create_all(self.engine)
-
+        
         self._initialized = True
-        self.logger = get_logger()
-
-        # 资源管理
-        self.resource_manager = ThreadResourceManager()
-        self.resource_manager.register_thread_pool(
-            self.engine.pool,
-            f"数据库连接池(size={pool_size}, overflow={max_overflow})"
-        )
-
+        self.logger = get_logger()    
         # 初始化数据库
         self.init_db()
-
-        self.logger.info(f"数据库连接池已初始化: pool_size={pool_size}, max_overflow={max_overflow}")
-
-    def __del__(self):
-        """析构函数，确保连接池被正确关闭"""
-        try:
-            if hasattr(self, 'Session'):
-                self.Session.remove()
-            if hasattr(self, 'resource_manager'):
-                asyncio.create_task(self.resource_manager.cleanup_all())
-        except Exception as e:
-            if hasattr(self, 'logger'):
-                self.logger.error(f"清理数据库资源失败: {e}")
 
     def init_db(self):
         """初始化渠道信息"""
@@ -86,29 +50,8 @@ class DatabaseManager:
 
 
     def get_session(self):
-        """获取数据库会话 - 线程安全版本"""
+        """获取数据库会话"""
         return self.Session()
-
-    def get_connection_pool_stats(self) -> Dict[str, Any]:
-        """获取连接池统计信息"""
-        if hasattr(self.engine.pool, 'status'):
-            return {
-                'pool_size': self.engine.pool.size(),
-                'checked_in': self.engine.pool.checkedin(),
-                'checked_out': self.engine.pool.checkedout(),
-                'overflow': self.engine.pool.overflow(),
-                'invalid': self.engine.pool.invalid()
-            }
-        return {}
-
-    async def close_all_connections(self):
-        """关闭所有数据库连接"""
-        try:
-            self.Session.remove()
-            self.engine.dispose()
-            self.logger.info("所有数据库连接已关闭")
-        except Exception as e:
-            self.logger.error(f"关闭数据库连接失败: {e}")
     
     # 渠道相关操作
     def add_channel(self, channel_name: str, description: str = None) -> bool:
@@ -908,5 +851,16 @@ class DatabaseManager:
         finally:
             session.close()
 
-# 创建全局数据库管理器实例
-db_manager = DatabaseManager() 
+_db_instance = None
+
+def get_db_manager() -> "DatabaseManager":
+    global _db_instance
+    if _db_instance is None:
+        _db_instance = DatabaseManager()
+    return _db_instance
+
+class _LazyDBProxy:
+    def __getattr__(self, name):
+        return getattr(get_db_manager(), name)
+
+db_manager = _LazyDBProxy()

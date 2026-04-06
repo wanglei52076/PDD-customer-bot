@@ -1,14 +1,30 @@
 """
 拼多多账号异步登录认证
 """
+import os
+# 必须在导入 playwright 之前设置浏览器路径
+from pathlib import Path
+from utils.path_utils import get_app_dir
+from utils.logger_loguru import get_logger
+
+# 设置 Playwright 浏览器路径
+app_dir = get_app_dir()
+browsers_path = app_dir / ".browsers"
+if browsers_path.exists():
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_path)
+    logger_temp = get_logger("Pdd_login_init")
+    logger_temp.info(f"设置 Playwright 浏览器路径: {browsers_path}")
+else:
+    # 回退到用户目录
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = os.path.join(os.getenv("LOCALAPPDATA", ""), "ms-playwright")
+
 from http import cookies
 import requests
 import json
-import os
 import hashlib
 import asyncio
 from typing import Optional, Dict, Any, Tuple
-from utils.logger import get_logger
+import sys
 from database import db_manager
 from playwright.async_api import async_playwright
 from Channel.pinduoduo.utils.API.get_shop_info import GetShopInfo
@@ -34,7 +50,7 @@ class PDDLogin():
             playwright = await async_playwright().start()
             
             # 创建独立的用户数据目录，避免多实例冲突
-            user_data_dir = f"./user_data/{(self.name)}"
+            user_data_dir = str(app_dir / "user_data" / self.name)
             self.logger.debug(f"使用用户数据目录: {user_data_dir}")
             
             # 使用持久化上下文，自动处理用户数据目录
@@ -77,8 +93,8 @@ class PDDLogin():
             
             # 获取cookies并转换为字典格式
             cookies_list = await context.cookies()
-            # 将playwright格式的cookies列表转换为字典格式
-            cookies_dict = {cookie['name']: cookie['value'] for cookie in cookies_list}
+            # 将playwright格式的cookies列表转换为字典格式，使用安全的get方法
+            cookies_dict = {cookie.get('name', ''): cookie.get('value', '') for cookie in cookies_list if cookie.get('name')}
             cookies_json = json.dumps(cookies_dict)
             # 关闭浏览器上下文
             await context.close()
@@ -96,12 +112,13 @@ class PDDLogin():
         Returns:
             str: cookies的JSON字符串，如果失败返回False
         """
+        playwright = None
         try:
             # 启动Playwright
             playwright = await async_playwright().start()
             
             # 使用相同的用户数据目录
-            user_data_dir = f"./user_data/{hash(self.name)}"
+            user_data_dir = str(app_dir / "user_data" / str(hash(self.name)))
             self.logger.debug(f"使用用户数据目录刷新cookies: {user_data_dir}")
             
             # 检查用户数据目录是否存在
@@ -144,7 +161,7 @@ class PDDLogin():
             
             # 获取最新的cookies
             cookies_list = await context.cookies()
-            cookies_dict = {cookie['name']: cookie['value'] for cookie in cookies_list}
+            cookies_dict = {cookie.get('name', ''): cookie.get('value', '') for cookie in cookies_list if cookie.get('name')}
             cookies_json = json.dumps(cookies_dict)
             
             # 关闭浏览器上下文
@@ -156,20 +173,30 @@ class PDDLogin():
             
         except Exception as e:
             self.logger.error(f"刷新cookies失败: {str(e)}")
-            if 'playwright' in locals():
-                await playwright.stop()
+            if playwright:
+                try:
+                    await playwright.stop()
+                except:
+                    pass
             return False
 
     def Set_user_info(self,cookies_json):
         user_info = GetUserInfo(cookies_json)
-        user_id,user_name,mall_id = user_info.get_user_info()
-     
-        return user_id,user_name,mall_id
+        result = user_info.get_user_info()
+        if result is False:
+            self.logger.error("获取用户信息失败")
+            return None, None, None
+        user_id, user_name, mall_id = result
+        return user_id, user_name, mall_id
 
     def Set_shop_info(self,cookies_json):
         shop_info = GetShopInfo(cookies_json)
-        shop_id,shop_name,mallLogo = shop_info.get_shop_info()
-        return shop_id,shop_name,mallLogo
+        result = shop_info.get_shop_info()
+        if result is False:
+            self.logger.error("获取店铺信息失败")
+            return None, None, None
+        shop_id, shop_name, mallLogo = result
+        return shop_id, shop_name, mallLogo
     
 async def login_pdd(name, password):
     """
@@ -191,6 +218,11 @@ async def login_pdd(name, password):
         # 获取用户信息和店铺信息
         user_id, user_name, mall_id = pdd_login.Set_user_info(cookies_json)
         shop_id, shop_name, mallLogo = pdd_login.Set_shop_info(cookies_json)
+        
+        # 检查是否成功获取到必要信息
+        if user_id is None or shop_id is None:
+            pdd_login.logger.error(f"账号 '{name}' 登录成功，但获取用户信息或店铺信息失败")
+            return False
 
         pdd_login.logger.info(f"账号 '{name}' 登录成功，获取到店铺: {shop_name}({shop_id})")
 
@@ -230,6 +262,11 @@ async def refresh_pdd_cookies(name, password=None):
         # 获取用户信息和店铺信息
         user_id, user_name, mall_id = pdd_login.Set_user_info(cookies_json)
         shop_id, shop_name, mallLogo = pdd_login.Set_shop_info(cookies_json)
+        
+        # 检查是否成功获取到必要信息
+        if user_id is None or shop_id is None:
+            pdd_login.logger.error(f"账号 '{name}' cookies刷新成功，但获取用户信息或店铺信息失败")
+            return False
 
         pdd_login.logger.info(f"账号 '{name}' cookies刷新成功，店铺: {shop_name}({shop_id})")
 
