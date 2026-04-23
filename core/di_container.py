@@ -126,11 +126,14 @@ class DIContainer:
         with self._lock:
             if key not in self._services:
                 raise ValueError(f"服务 {service_type.__name__} 未注册")
-
             descriptor = self._services[key]
 
-            # 处理单例
-            if descriptor.lifetime == ServiceLifetime.SINGLETON:
+        # 处理单例（双重检查锁定，避免在锁内执行耗时创建）
+        if descriptor.lifetime == ServiceLifetime.SINGLETON:
+            if key in self._singletons:
+                return self._singletons[key]
+
+            with self._lock:
                 if key in self._singletons:
                     return self._singletons[key]
 
@@ -146,8 +149,12 @@ class DIContainer:
                 self._singletons[key] = instance
                 return instance
 
-            # 处理作用域
-            elif descriptor.lifetime == ServiceLifetime.SCOPED:
+        # 处理作用域
+        elif descriptor.lifetime == ServiceLifetime.SCOPED:
+            if key in self._scoped_instances:
+                return self._scoped_instances[key]
+
+            with self._lock:
                 if key in self._scoped_instances:
                     return self._scoped_instances[key]
 
@@ -161,14 +168,14 @@ class DIContainer:
                 self._scoped_instances[key] = instance
                 return instance
 
-            # 处理瞬态
-            elif descriptor.lifetime == ServiceLifetime.TRANSIENT:
-                if descriptor.factory is not None:
-                    return descriptor.factory()
-                elif descriptor.implementation_type is not None:
-                    return self._create_instance(descriptor.implementation_type)
-                else:
-                    raise ValueError(f"无法创建瞬态服务 {service_type.__name__}")
+        # 处理瞬态
+        elif descriptor.lifetime == ServiceLifetime.TRANSIENT:
+            if descriptor.factory is not None:
+                return descriptor.factory()
+            elif descriptor.implementation_type is not None:
+                return self._create_instance(descriptor.implementation_type)
+            else:
+                raise ValueError(f"无法创建瞬态服务 {service_type.__name__}")
 
     async def get_async(self, service_type: Type) -> Any:
         """异步获取服务实例"""
@@ -177,17 +184,20 @@ class DIContainer:
         with self._lock:
             if key not in self._services:
                 raise ValueError(f"服务 {service_type.__name__} 未注册")
-
             descriptor = self._services[key]
 
-            # 处理单例
-            if descriptor.lifetime == ServiceLifetime.SINGLETON:
+        # 处理单例（双重检查锁定，避免在锁内执行耗时创建）
+        if descriptor.lifetime == ServiceLifetime.SINGLETON:
+            if key in self._singletons:
+                return self._singletons[key]
+
+            with self._lock:
                 if key in self._singletons:
                     return self._singletons[key]
 
                 if descriptor.instance is not None:
                     instance = descriptor.instance
-                elif hasattr(descriptor.factory, '__call__') and asyncio.iscoroutinefunction(descriptor.factory):
+                elif descriptor.factory is not None and asyncio.iscoroutinefunction(descriptor.factory):
                     instance = await descriptor.factory()
                 elif descriptor.factory is not None:
                     instance = descriptor.factory()
@@ -199,16 +209,37 @@ class DIContainer:
                 self._singletons[key] = instance
                 return instance
 
-            # 处理瞬态
-            elif descriptor.lifetime == ServiceLifetime.TRANSIENT:
-                if hasattr(descriptor.factory, '__call__') and asyncio.iscoroutinefunction(descriptor.factory):
-                    return await descriptor.factory()
+        # 处理作用域
+        elif descriptor.lifetime == ServiceLifetime.SCOPED:
+            if key in self._scoped_instances:
+                return self._scoped_instances[key]
+
+            with self._lock:
+                if key in self._scoped_instances:
+                    return self._scoped_instances[key]
+
+                if descriptor.factory is not None and asyncio.iscoroutinefunction(descriptor.factory):
+                    instance = await descriptor.factory()
                 elif descriptor.factory is not None:
-                    return descriptor.factory()
+                    instance = descriptor.factory()
                 elif descriptor.implementation_type is not None:
-                    return await self._create_instance_async(descriptor.implementation_type)
+                    instance = await self._create_instance_async(descriptor.implementation_type)
                 else:
-                    raise ValueError(f"无法创建瞬态服务 {service_type.__name__}")
+                    raise ValueError(f"无法创建作用域服务 {service_type.__name__}")
+
+                self._scoped_instances[key] = instance
+                return instance
+
+        # 处理瞬态
+        elif descriptor.lifetime == ServiceLifetime.TRANSIENT:
+            if descriptor.factory is not None and asyncio.iscoroutinefunction(descriptor.factory):
+                return await descriptor.factory()
+            elif descriptor.factory is not None:
+                return descriptor.factory()
+            elif descriptor.implementation_type is not None:
+                return await self._create_instance_async(descriptor.implementation_type)
+            else:
+                raise ValueError(f"无法创建瞬态服务 {service_type.__name__}")
 
     def _create_instance(self, implementation_type: Type) -> Any:
         """创建实例（自动注入依赖）"""
@@ -233,7 +264,7 @@ class DIContainer:
             return implementation_type(**kwargs)
         except Exception as e:
             self.logger.error(f"创建实例失败 {implementation_type.__name__}: {e}")
-            raise
+            raise RuntimeError(f"Failed to create instance of {implementation_type.__name__}") from e
 
     async def _create_instance_async(self, implementation_type: Type) -> Any:
         """异步创建实例（自动注入依赖）"""
@@ -253,10 +284,7 @@ class DIContainer:
 
                 if param.annotation != inspect.Parameter.empty:
                     dependency_type = param.annotation
-                    if inspect.iscoroutinefunction(dependency_type):
-                        kwargs[param_name] = dependency_type
-                    else:
-                        kwargs[param_name] = await self.get_async(dependency_type)
+                    kwargs[param_name] = await self.get_async(dependency_type)
 
             return implementation_type(**kwargs)
         except Exception as e:
@@ -336,6 +364,14 @@ def configure_standard_services(config_instance: Any = None) -> 'DIContainer':
         container.register_singleton(
             DatabaseManager,
             factory=lambda: DatabaseManager(db_path=db_path)
+        )
+
+    # 3. KnowledgeService（知识库服务）
+    from database.knowledge_service import KnowledgeService
+    if not container.is_registered(KnowledgeService):
+        container.register_singleton(
+            KnowledgeService,
+            factory=lambda: KnowledgeService()
         )
 
     # 注：QueueManager、MessageConsumerManager、CacheManager

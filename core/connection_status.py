@@ -2,7 +2,7 @@
 连接状态管理 - 独立模块
 
 职责：维护所有 PDDChannel 实例的连接状态。
-从 Channel/pinduoduo/pdd_chnnel.py 中提取出来，
+从 Channel/pinduoduo/pdd_channel.py 中提取出来，
 明确其跨实例共享状态的职责边界。
 """
 
@@ -46,20 +46,15 @@ class ConnectionStatusManager:
     - 不持有任何 PDDChannel 实例引用
     - 线程安全（使用 RLock）
 
-    单例管理：同时使用 __new__ 单例模式（安全兜底）和 DI 容器注册。
-    __new__ 保证即使直接调用 ConnectionStatusManager() 也返回同一实例；
-    DI 容器注册确保通过 container.get() 访问的一致性。
+    单例管理：通过 DI 容器注册为单例（推荐方式）。
     """
 
-    _instance: Optional['ConnectionStatusManager'] = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            instance = super().__new__(cls)
-            instance._connections: Dict[str, ConnectionStatus] = {}
-            instance._lock = RLock()
-            cls._instance = instance
-        return cls._instance
+    def __init__(self):
+        # 仅在首次初始化时设置，避免单例模式下重复初始化
+        if not hasattr(self, '_initialized') or not self._initialized:
+            self._connections: Dict[str, ConnectionStatus] = {}
+            self._lock = RLock()
+            self._initialized = True
 
     def update_status(
         self,

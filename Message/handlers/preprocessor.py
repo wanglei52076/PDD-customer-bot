@@ -77,28 +77,26 @@ class MessagePreprocessor:
         try:
             # 根据消息类型进行特定处理
             if msg_type == ContextType.IMAGE:
-                return self.create_image_message(content)
+                return "[图片消息]"
             elif msg_type == ContextType.VIDEO:
-                return self.create_video_message(content)
-            
+                return "[视频消息]"
+
             # 1. 尝试解析为JSON
             parsed = self.safe_parse_json(content)
 
             if isinstance(parsed, dict):
-                # 2. 如果是字典，提取关键信息
+                # 2. 如果是字典，提取关键信息，直接返回纯文本
                 processed = self._extract_key_info(parsed)
                 if processed:
-                    # 对于订单信息等特殊类型，虽然内容是提取后的文本，但可能需要保持特定格式
-                    # 这里暂时统一转为文本消息，后续可根据需要优化
-                    return self.create_text_message(processed)
+                    return processed
 
-            # 3. 清理文本
+            # 3. 清理文本，直接返回纯文本
             cleaned = self._clean_text(content)
-            return self.create_text_message(cleaned)
+            return cleaned
 
         except Exception as e:
             logger.error(f"Message preprocessing failed: {e}")
-            return self.create_text_message("消息处理失败")
+            return "消息处理失败"
 
     def _extract_key_info(self, data: Dict[str, Any]) -> str:
         """提取关键信息"""
@@ -116,6 +114,11 @@ class MessagePreprocessor:
         goods_spec = data.get('goods_spec') or data.get('spec')
         if goods_spec:
             parts.append(f"规格：{goods_spec}")
+
+        # 商品ID - 保留用于知识库查询
+        goods_id = data.get('goods_id')
+        if goods_id:
+            parts.append(f"商品ID：{goods_id}")
 
         # 订单信息
         order_id = data.get('order_id') or data.get('order')

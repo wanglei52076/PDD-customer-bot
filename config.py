@@ -11,10 +11,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 from contextlib import contextmanager
-from agno.models.openai import OpenAILike
-from agno.knowledge.embedder.openai import OpenAIEmbedder
 from pydantic import BaseModel, Field, field_validator, ConfigDict
-from agno.db.sqlite import SqliteDb
 
 
 class ModelType(str, Enum):
@@ -25,19 +22,13 @@ class ModelType(str, Enum):
     KIMI = "kimi"
     CLAUDE = "claude"
 
-class EmbedderConfig(OpenAIEmbedder):
-    """嵌入器配置模型"""
+class LLMConfig(BaseModel):
+    """LLM 配置模型"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    pass
-class LLMConfig(OpenAILike):
-    """LLM配置模型"""
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    pass
+    model_name: str = Field(default="", description="模型名称")
+    api_key: str = Field(default="", description="API密钥")
+    api_base: str = Field(default="", description="API地址")
 
-class KnowledgeConfig(BaseModel):
-    """知识库配置模型"""
-    contents_db_path: str = Field(default="", description="内容数据库路径")
-    vector_db_path: str = Field(default="", description="向量数据库路径")
 
 class BusinessHoursConfig(BaseModel):
     """营业时间配置模型"""
@@ -56,9 +47,7 @@ class BusinessHoursConfig(BaseModel):
 
 class PromptConfig(BaseModel):
     """提示词配置模型"""
-    description: str = Field(default="", description="角色描述")
     instructions: list[str] = Field(default=[], description="指令")
-    additional_context: str = Field(default="", description="额外提示词")
 
 
 class ConfigModel(BaseModel):
@@ -71,14 +60,6 @@ class ConfigModel(BaseModel):
     llm: LLMConfig = Field(
         default_factory=LLMConfig,
         description="LLM配置"
-    )
-    embedder: EmbedderConfig = Field(
-        default_factory=EmbedderConfig,
-        description="嵌入器配置"
-    )
-    knowledge_base: KnowledgeConfig = Field(
-        default_factory=KnowledgeConfig,
-        description="知识库配置"
     )
     prompt: PromptConfig = Field(
         default_factory=PromptConfig,
@@ -99,14 +80,14 @@ config_base = {
         "api_key": "",
         "api_base": ""
     },
-    "embedder": {
-        "model_name": "",
-        "api_key": "",
-        "api_base": ""
-    },
-    "knowledge_base": {
-        "contents_db_path": "",
-        "vector_db_path": ""
+    "prompt": {
+        "instructions": [
+            "1. 请用中文回复客户问题",
+            "2. 当用户询问特定商品的信息、成分、使用方法、价格、规格等问题时，请优先使用 get_product_knowledge 工具获取商品详细知识，必须提供 goods_id（商品ID）和 shop_id（店铺ID）",
+            "3. 当用户询问售后政策、物流信息、退换货规则、常见问题解答等非产品特定问题时，请使用 search_customer_service_knowledge 工具搜索客服知识，必须提供 query（搜索关键词）和 shop_id（店铺ID）",
+            "4. 如果知识库中有相关信息，请根据知识库内容回答用户问题",
+            "5. 如果知识库中没有相关信息，再根据已有知识回答或建议用户联系人工客服"
+        ]
     }
 }
 
@@ -260,8 +241,17 @@ class Config:
         return self.get(key)
 
     def __contains__(self, key: str) -> bool:
-        """支持使用 in 操作符检查配置项"""
-        return self.get(key) is not None
+        """支持使用 in 操作符检查配置项是否存在"""
+        with self._lock:
+            if self._config is None:
+                return False
+            keys = key.split('.')
+            value = self._config
+            for k in keys:
+                if not isinstance(value, dict) or k not in value:
+                    return False
+                value = value[k]
+            return True
 
     def set(self, key: str, value: Any, save: bool = True) -> Any:
         """
@@ -330,7 +320,7 @@ class Config:
                 raise ConfigValidationError(f"批量更新配置失败: {e}")
 
     def save(self) -> bool:
-        """将当前配置保存到文件"""
+        """将当前配置原子性地保存到文件（临时文件+重命名）"""
         with self._lock:
             if self._config is None:
                 raise ConfigError("没有可保存的配置")
@@ -339,12 +329,23 @@ class Config:
                 # 创建目录（如果不存在）
                 self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
-                with open(self.config_path, 'w', encoding='utf-8') as f:
+                # 使用临时文件 + 原子重命名，避免写入过程中崩溃导致配置文件损坏
+                temp_path = self.config_path.with_suffix('.tmp')
+                with open(temp_path, 'w', encoding='utf-8') as f:
                     json.dump(self._config, f, ensure_ascii=False, indent=4)
 
+                # 原子重命名替换原文件
+                temp_path.replace(self.config_path)
                 return True
             except Exception as e:
                 print(f"保存配置文件失败: {e}")
+                # 清理临时文件（如果存在）
+                try:
+                    temp_path = self.config_path.with_suffix('.tmp')
+                    if temp_path.exists():
+                        temp_path.unlink()
+                except Exception:
+                    pass
                 return False
 
     def _deep_merge(self, base: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
@@ -362,18 +363,17 @@ class Config:
     @contextmanager
     def atomic_update(self):
         """原子性更新配置的上下文管理器"""
-        original_config = self._config.copy() if self._config else None
+        import copy
+        original_config = copy.deepcopy(self._config) if self._config else None
+        original_validated = copy.deepcopy(self._validated_config)
         try:
             yield self
             self.save()
         except Exception:
             # 回滚到原始配置
-            if original_config:
+            if original_config is not None:
                 self._config = original_config
-                try:
-                    self._validated_config = ConfigModel(**original_config)
-                except Exception:
-                    pass
+                self._validated_config = original_validated
             raise
 
 # 创建全局配置实例
@@ -412,3 +412,4 @@ def update_config(config_dict: Dict[str, Any], save: bool = False) -> Dict[str, 
 def get_validated_config() -> ConfigModel:
     """全局便捷函数：获取验证后的配置模型"""
     return config.get_model()
+

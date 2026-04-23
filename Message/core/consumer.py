@@ -25,6 +25,7 @@ class MessageConsumer:
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.running = False
         self.consumer_task = None
+        self._tasks: set = set()
         self.logger = get_logger(f"Consumer.{queue_name}")
 
     def add_handler(self, handler: MessageHandler):
@@ -55,8 +56,10 @@ class MessageConsumer:
                 try:
                     wrapper = await queue.get(timeout=1.0)
                     if wrapper:
-                        # 使用信号量控制并发数
-                        asyncio.create_task(self._process_message(wrapper))
+                        # 使用信号量控制并发数，跟踪任务以便优雅停止
+                        task = asyncio.create_task(self._process_message(wrapper))
+                        self._tasks.add(task)
+                        task.add_done_callback(self._tasks.discard)
                 except Exception as e:
                     self.logger.error(f"Consumer error: {e}")
                     await asyncio.sleep(0.1)
@@ -76,8 +79,11 @@ class MessageConsumer:
                 pass
 
         # 等待所有正在处理的任务完成
-        await self.semaphore.acquire()
-        self.semaphore.release()
+        if self._tasks:
+            pending = [t for t in self._tasks if not t.done()]
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            self._tasks.clear()
 
     async def _process_message(self, wrapper: MessageWrapper):
         """处理单个消息"""

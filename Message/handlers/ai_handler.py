@@ -19,7 +19,7 @@ class AIReplyHandler(BaseHandler):
         if bot is None:
             try:
                 from core.di_container import container
-                from Agent.CustomerAgent.agent import CustomerAgent
+                from Agent.CustomerAgent.custom.customer_agent import CustomerAgent
                 bot = container.get(CustomerAgent)
             except Exception as e:
                 from utils.logger_loguru import get_logger
@@ -124,10 +124,9 @@ class AIReplyHandler(BaseHandler):
             # 尝试发送备用回复
             success = await self._send_reply(context, reply_text, metadata)
             if not success:
-                # 如果发送失败，至少记录日志
+                # 如果发送失败，记录日志并返回False让下游有机会处理
                 await self.log_message(context, "备用回复发送失败", f"内容: {reply_text}")
-                # 但仍然返回True，表示消息已处理
-                return True
+                return False
 
             await self.log_message(context, "备用回复发送成功", f"内容: {reply_text}")
             return True

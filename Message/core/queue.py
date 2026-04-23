@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import hashlib
 import time
 from typing import Optional, Dict, Set
 from utils.logger_loguru import get_logger
@@ -107,23 +108,33 @@ class SimpleMessageQueue:
         if not self._deduplication_cache:
             return False
 
-        content_hash = hash(wrapper.context.content)
+        content_str = str(wrapper.context.content) if wrapper.context.content is not None else ""
+        content_hash = hashlib.md5(content_str.encode("utf-8")).hexdigest()
         if content_hash in self._deduplication_cache:
             return True
 
-        # 添加到缓存并定期清理
+        # 添加到缓存，并定期清理 + 限制大小避免内存泄漏
         self._deduplication_cache.add(content_hash)
         self._cleanup_deduplication_cache()
         return False
 
     def _cleanup_deduplication_cache(self):
-        """清理过期的去重缓存"""
+        """清理过期的去重缓存，限制最大条目数避免内存泄漏"""
         current_time = time.time()
+        # 定期清空缓存
         if current_time - self._last_cleanup_time > self.config.deduplication_window:
-            # 简单策略：清空缓存
             self._deduplication_cache.clear()
             self._last_cleanup_time = current_time
-            self.logger.debug("Deduplication cache cleaned")
+            self.logger.debug("Deduplication cache cleaned (time window)")
+            return
+
+        # 限制最大缓存条目数（高并发保护）
+        MAX_DEDUP_ENTRIES = 10000
+        if len(self._deduplication_cache) > MAX_DEDUP_ENTRIES:
+            # 清空一半以平衡内存和去重效果
+            self._deduplication_cache.clear()
+            self._last_cleanup_time = current_time
+            self.logger.warning(f"Deduplication cache exceeded {MAX_DEDUP_ENTRIES} entries, cleared")
 
     async def clear(self):
         """清空队列"""

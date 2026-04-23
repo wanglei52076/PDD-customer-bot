@@ -62,9 +62,10 @@ class KeywordDetectionHandler(BaseHandler):
     async def handle(self, context: Context, metadata: Dict[str, Any]) -> bool:
         """转接到人工客服"""
         try:
-            shop_id = context.kwargs.shop_id
-            user_id = context.kwargs.user_id
-            from_uid = context.kwargs.from_uid
+            kwargs = context.kwargs
+            shop_id = getattr(kwargs, 'shop_id', None) or (kwargs.get('shop_id') if isinstance(kwargs, dict) else None)
+            user_id = getattr(kwargs, 'user_id', None) or (kwargs.get('user_id') if isinstance(kwargs, dict) else None)
+            from_uid = getattr(kwargs, 'from_uid', None) or (kwargs.get('from_uid') if isinstance(kwargs, dict) else None)
             
             if not all([shop_id, user_id, from_uid]):
                 return False

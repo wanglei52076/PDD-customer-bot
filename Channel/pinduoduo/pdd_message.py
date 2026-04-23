@@ -3,6 +3,38 @@
 """
 from bridge.context import  ContextType
 from Message.message import ChatMessage
+from enum import IntEnum
+from typing import Any, Dict, Optional
+
+
+class PDDMsgType(IntEnum):
+    """拼多多消息类型枚举"""
+    TEXT = 0
+    IMAGE = 1
+    VIDEO = 14
+    WITHDRAW = 1002
+    EMOTION = 5
+    GOODS_SPEC = 64
+    TRANSFER = 24
+
+
+class PDDSubType(IntEnum):
+    """拼多多消息子类型枚举"""
+    ORDER_INFO = 1
+    GOODS_INQUIRY = 0
+
+
+def _safe_get(data: Dict[str, Any], *keys, default=None) -> Any:
+    """安全获取嵌套字典值，避免链式get()时中间值为None导致AttributeError"""
+    result = data
+    for key in keys:
+        if not isinstance(result, dict):
+            return default
+        result = result.get(key)
+        if result is None:
+            return default
+    return result
+
 
 class BaseMessageHandler:
     def __init__(self, msg):
@@ -23,44 +55,46 @@ class BaseMessageHandler:
         
 class MessageTypeHandler:
     """消息类型处理类"""
+
+    @staticmethod
+    def _get_content(msg_data: Dict[str, Any], context_type: ContextType, path: tuple) -> tuple:
+        """通用内容提取"""
+        return context_type, _safe_get(msg_data, *path)
+
     @staticmethod
     def handle_text(msg_data):
         """处理文本消息"""
-        return ContextType.TEXT,msg_data.get("message",{}).get("content")
+        return MessageTypeHandler._get_content(msg_data, ContextType.TEXT, ("message", "content"))
 
     @staticmethod
     def handle_image(msg_data):
         """处理图片消息"""
-        image_url = msg_data.get("message",{}).get("content")
-        return ContextType.IMAGE,image_url
+        return MessageTypeHandler._get_content(msg_data, ContextType.IMAGE, ("message", "content"))
 
     @staticmethod
     def handle_video(msg_data):
         """处理视频消息"""
-        video_url = msg_data.get("message",{}).get("content")
-        return ContextType.VIDEO,video_url
+        return MessageTypeHandler._get_content(msg_data, ContextType.VIDEO, ("message", "content"))
 
     @staticmethod
     def handle_emotion(msg_data):
         """处理表情消息"""
-        emotion_data = msg_data.get("info",{}).get("description")
-        return ContextType.EMOTION,emotion_data
+        return MessageTypeHandler._get_content(msg_data, ContextType.EMOTION, ("info", "description"))
 
     @staticmethod
     def handle_withdraw(msg_data):
         """处理撤回消息"""
-        withdraw_hint = msg_data.get("info",{}).get("withdraw_hint")
-        return ContextType.WITHDRAW,withdraw_hint
+        return MessageTypeHandler._get_content(msg_data, ContextType.WITHDRAW, ("info", "withdraw_hint"))
 
     @staticmethod
     def handle_goods_inquiry(msg_data):
         """处理商品咨询消息"""
         goods_info = {
-            "goods_id": msg_data.get("message",{}).get("info",{}).get("goodsID"),##商品ID
-            "goods_name": msg_data.get("message",{}).get("info",{}).get("goodsName"),##商品名称
-            "goods_price": msg_data.get("message",{}).get("info",{}).get("goodsPrice"),##商品价格
-            "goods_thumb_url": msg_data.get("message",{}).get("info",{}).get("goodsThumbUrl"),##商品缩略图
-            "link_url": msg_data.get("message",{}).get("info",{}).get("linkUrl"),##商品链接
+            "goods_id": _safe_get(msg_data, "message", "info", "goodsID"),
+            "goods_name": _safe_get(msg_data, "message", "info", "goodsName"),
+            "goods_price": _safe_get(msg_data, "message", "info", "goodsPrice"),
+            "goods_thumb_url": _safe_get(msg_data, "message", "info", "goodsThumbUrl"),
+            "link_url": _safe_get(msg_data, "message", "info", "linkUrl"),
         }
         return ContextType.GOODS_INQUIRY,goods_info
 
@@ -68,10 +102,10 @@ class MessageTypeHandler:
     def handle_goods_spec(msg_data):
         """咨询商品规格"""
         goods_info = {
-            "goods_id": msg_data.get("message",{}).get("info",{}).get("data",{}).get("goodsID"),##商品ID
-            "goods_name": msg_data.get("message",{}).get("info",{}).get("data",{}).get("goodsName"),##商品名称
-            "goods_price": msg_data.get("message",{}).get("info",{}).get("data",{}).get("goodsPrice"),##商品价格
-            "goods_spec": msg_data.get("message",{}).get("info",{}).get("data",{}).get("spec"),##商品规格
+            "goods_id": _safe_get(msg_data, "message", "info", "data", "goodsID"),
+            "goods_name": _safe_get(msg_data, "message", "info", "data", "goodsName"),
+            "goods_price": _safe_get(msg_data, "message", "info", "data", "goodsPrice"),
+            "goods_spec": _safe_get(msg_data, "message", "info", "data", "spec"),
         }
         return ContextType.GOODS_SPEC,goods_info
 
@@ -79,20 +113,20 @@ class MessageTypeHandler:
     def handle_order_info(msg_data):
         """处理订单信息消息"""
         order_info = {
-            "order_id": msg_data.get("message",{}).get("info",{}).get("orderSequenceNo"),##订单编号
-            "goods_id": msg_data.get("message",{}).get("info",{}).get("goodsID"),##商品ID
-            "goods_name": msg_data.get("message",{}).get("info",{}).get("goodsName"),##商品名称
-            "afterSalesStatus": msg_data.get("message",{}).get("info",{}).get("afterSalesStatus"),##售后状态
-            "afterSalesType": msg_data.get("message",{}).get("info",{}).get("afterSalesType"),##售后类型
-            "spec": msg_data.get("message",{}).get("info",{}).get("spec"),##规格
+            "order_id": _safe_get(msg_data, "message", "info", "orderSequenceNo"),
+            "goods_id": _safe_get(msg_data, "message", "info", "goodsID"),
+            "goods_name": _safe_get(msg_data, "message", "info", "goodsName"),
+            "afterSalesStatus": _safe_get(msg_data, "message", "info", "afterSalesStatus"),
+            "afterSalesType": _safe_get(msg_data, "message", "info", "afterSalesType"),
+            "spec": _safe_get(msg_data, "message", "info", "spec"),
         }
         return ContextType.ORDER_INFO,order_info
-    
+
     @staticmethod
     def handle_mall_system_msg(msg_data):
         """处理商城消息"""
         system_msg = {
-            "user_id":msg_data.get("message",{}).get("data",{}).get("user_id"),
+            "user_id": _safe_get(msg_data, "message", "data", "user_id"),
         }
         return ContextType.MALL_SYSTEM_MSG,system_msg
 
@@ -101,9 +135,9 @@ class MessageTypeHandler:
     def handle_auth(msg_data):
         """处理认证消息"""
         auth_info = {
-            "uid":msg_data.get("uid"),
-            "result":msg_data.get("auth",{}).get("result"),
-            "status":msg_data.get("status"),
+            "uid": _safe_get(msg_data, "uid"),
+            "result": _safe_get(msg_data, "auth", "result"),
+            "status": _safe_get(msg_data, "status"),
         }
         return ContextType.AUTH,auth_info
 
@@ -111,8 +145,8 @@ class MessageTypeHandler:
     def handle_transfer(msg_data):
         """处理转接消息"""
         transfer_info = {
-            "from_uid":msg_data.get("message",{}).get("from",{}).get("uid"),
-            "to_uid":msg_data.get("message",{}).get("to",{}).get("uid")
+            "from_uid": _safe_get(msg_data, "message", "from", "uid"),
+            "to_uid": _safe_get(msg_data, "message", "to", "uid")
         }
         return ContextType.TRANSFER,transfer_info
 class PDDChatMessage(ChatMessage):
@@ -145,25 +179,25 @@ class PDDChatMessage(ChatMessage):
         self.msg_type=self.msg.get("response")
         if self.msg_type == "push":
             user_msg_type=self.msg.get("message",{}).get("type")
-            if user_msg_type == 0:
+            if user_msg_type == PDDMsgType.TEXT:
                 sub_type=self.msg.get("message",{}).get("sub_type")
-                if sub_type == 1:
+                if sub_type == PDDSubType.ORDER_INFO:
                     self.user_msg_type,self.content = MessageTypeHandler.handle_order_info(self.msg)
-                elif sub_type == 0:
+                elif sub_type == PDDSubType.GOODS_INQUIRY:
                     self.user_msg_type,self.content = MessageTypeHandler.handle_goods_inquiry(self.msg)
                 else:
                     self.user_msg_type,self.content = MessageTypeHandler.handle_text(self.msg)
-            elif user_msg_type == 1:
+            elif user_msg_type == PDDMsgType.IMAGE:
                 self.user_msg_type,self.content = MessageTypeHandler.handle_image(self.msg)
-            elif user_msg_type == 14:
+            elif user_msg_type == PDDMsgType.VIDEO:
                 self.user_msg_type,self.content = MessageTypeHandler.handle_video(self.msg)
-            elif user_msg_type == 1002:
+            elif user_msg_type == PDDMsgType.WITHDRAW:
                 self.user_msg_type,self.content = MessageTypeHandler.handle_withdraw(self.msg)
-            elif user_msg_type == 5:
+            elif user_msg_type == PDDMsgType.EMOTION:
                 self.user_msg_type,self.content = MessageTypeHandler.handle_emotion(self.msg)
-            elif user_msg_type == 64:
+            elif user_msg_type == PDDMsgType.GOODS_SPEC:
                 self.user_msg_type,self.content = MessageTypeHandler.handle_goods_spec(self.msg)
-            elif user_msg_type == 24:
+            elif user_msg_type == PDDMsgType.TRANSFER:
                 self.user_msg_type,self.content = MessageTypeHandler.handle_transfer(self.msg)
             else:
                 self.user_msg_type = ContextType.SYSTEM_STATUS

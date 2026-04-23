@@ -355,6 +355,7 @@ class LogDisplayWidget(QWidget):
         self._setup_ui()
         # 保存所有日志记录
         self.all_logs = []
+        self.auto_scroll = True  # 默认自动滚动
 
     def _setup_ui(self):
         """设置UI"""
@@ -374,6 +375,17 @@ class LogDisplayWidget(QWidget):
         # 直接添加到模型（模型会根据当前过滤器进行处理）
         self.log_table.model().add_log(level, message, record)
 
+        # 自动滚动到底部
+        if self.auto_scroll:
+            self.scroll_to_bottom()
+
+    def scroll_to_bottom(self):
+        """滚动到表格底部"""
+        model = self.log_table.model()
+        if model.rowCount() > 0:
+            last_index = model.index(model.rowCount() - 1, 0)
+            self.log_table.scrollTo(last_index, QTableView.ScrollHint.PositionAtBottom)
+
     def clear_all(self):
         """清空所有日志"""
         self.all_logs.clear()
@@ -381,6 +393,9 @@ class LogDisplayWidget(QWidget):
 
     def set_filter(self, filter_dict):
         """设置过滤条件"""
+        # 保存自动滚动状态
+        self.auto_scroll = filter_dict.get('auto_scroll', True)
+
         level_filter = filter_dict.get('level', '全部')
 
         # 创建过滤器函数

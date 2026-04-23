@@ -1,44 +1,44 @@
 import os
 import json
+from contextlib import contextmanager
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Generator
 from utils.logger_loguru import get_logger
 from database.models import Base, Channel, Shop, Account, Keyword
 
+
 class DatabaseManager:
-    """数据库管理类，提供数据库操作的封装"""
-    _instance = None
-    
-    def __new__(cls, *args, **kwargs):
-        """单例模式实现"""
-        if cls._instance is None:
-            cls._instance = super(DatabaseManager, cls).__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-    
+    """数据库管理类，提供数据库操作的封装
+
+    单例管理：通过 DI 容器注册为单例（推荐方式）。
+    也支持通过 get_db_manager() 函数获取单例实例。
+    """
+    _initialized = False
+
     def __init__(self, db_path: str = './temp/channel_shop.db'):
         """初始化数据库连接
-        
+
         Args:
             db_path: 数据库文件路径
         """
-        if self._initialized:
+        if DatabaseManager._initialized:
             return
-            
+
+        DatabaseManager._initialized = True
+
         # 确保数据库目录存在
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        
+
         # 创建数据库引擎
         self.engine = create_engine(f'sqlite:///{db_path}')
         self.Session = sessionmaker(bind=self.engine)
-        
+
         # 创建表结构
         Base.metadata.create_all(self.engine)
-        
-        self._initialized = True
-        self.logger = get_logger()    
+
+        self.logger = get_logger()
         # 初始化数据库
         self.init_db()
 
@@ -52,71 +52,73 @@ class DatabaseManager:
     def get_session(self):
         """获取数据库会话"""
         return self.Session()
-    
-    # 渠道相关操作
-    def add_channel(self, channel_name: str, description: str = None) -> bool:
-        """添加渠道
-        
-        Args:
-            channel_name: 渠道名称
-            description: 渠道描述
-            
-        Returns:
-            bool: 是否添加成功
-        """
-        session = self.get_session()
+
+    @contextmanager
+    def session_scope(self) -> Generator[Session, None, None]:
+        """数据库会话上下文管理器，自动处理 commit/rollback/close"""
+        session = self.Session()
         try:
-            # 检查渠道是否已存在
+            yield session
+            session.commit()
+        except SQLAlchemyError as e:
+            session.rollback()
+            self.logger.error(f"数据库操作失败: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    # ==================== 私有辅助方法 ====================
+    def _get_channel(self, session: Session, channel_name: str) -> Optional[Channel]:
+        """获取渠道对象"""
+        return session.query(Channel).filter(Channel.channel_name == channel_name).first()
+
+    def _get_shop(self, session: Session, channel: Channel, shop_id: str) -> Optional[Shop]:
+        """获取店铺对象"""
+        return session.query(Shop).filter(
+            Shop.channel_id == channel.id,
+            Shop.shop_id == shop_id
+        ).first()
+
+    def _get_account_by_user_id(self, session: Session, shop: Shop, user_id: str) -> Optional[Account]:
+        """通过user_id获取账号对象"""
+        return session.query(Account).filter(
+            Account.shop_id == shop.id,
+            Account.user_id == user_id
+        ).first()
+
+    def _get_account_by_username(self, session: Session, shop: Shop, username: str) -> Optional[Account]:
+        """通过username获取账号对象"""
+        return session.query(Account).filter(
+            Account.shop_id == shop.id,
+            Account.username == username
+        ).first()
+
+    # ==================== 渠道相关操作 ====================
+    def add_channel(self, channel_name: str, description: str = None) -> bool:
+        """添加渠道"""
+        with self.session_scope() as session:
             existing = session.query(Channel).filter(Channel.channel_name == channel_name).first()
             if existing:
                 return True
-                
-            # 创建新渠道
             channel = Channel(channel_name=channel_name, description=description)
             session.add(channel)
-            session.commit()
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"添加渠道失败: {str(e)}")
-            return False
-        finally:
-            session.close()
-    
+
     def get_channel(self, channel_name: str) -> Optional[Dict[str, Any]]:
-        """获取渠道信息
-        
-        Args:
-            channel_name: 渠道名称
-            
-        Returns:
-            Optional[Dict]: 渠道信息或None
-        """
-        session = self.get_session()
-        try:
+        """获取渠道信息"""
+        with self.session_scope() as session:
             channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
             if not channel:
                 return None
-                
             return {
                 'id': channel.id,
                 'channel_name': channel.channel_name,
                 'description': channel.description
             }
-        except SQLAlchemyError as e:
-            self.logger.error(f"获取渠道失败: {str(e)}")
-            return None
-        finally:
-            session.close()
-    
+
     def get_all_channels(self) -> List[Dict[str, Any]]:
-        """获取所有渠道
-        
-        Returns:
-            List[Dict]: 渠道列表
-        """
-        session = self.get_session()
-        try:
+        """获取所有渠道"""
+        with self.session_scope() as session:
             channels = session.query(Channel).all()
             return [
                 {
@@ -126,72 +128,33 @@ class DatabaseManager:
                 }
                 for channel in channels
             ]
-        except SQLAlchemyError as e:
-            self.logger.error(f"获取渠道列表失败: {str(e)}")
-            return []
-        finally:
-            session.close()
-    
+
     def delete_channel(self, channel_name: str) -> bool:
-        """删除渠道
-        
-        Args:
-            channel_name: 渠道名称
-            
-        Returns:
-            bool: 是否删除成功
-        """
-        session = self.get_session()
-        try:
+        """删除渠道"""
+        with self.session_scope() as session:
             channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
             if not channel:
                 self.logger.warning(f"渠道 {channel_name} 不存在")
                 return False
-                
             session.delete(channel)
-            session.commit()
             self.logger.info(f"成功删除渠道: {channel_name}")
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"删除渠道失败: {str(e)}")
-            return False
-        finally:
-            session.close()
     
     # 店铺相关操作
     def add_shop(self, channel_name: str, shop_id: str, shop_name: str, shop_logo: str, description: str = None) -> bool:
-        """添加店铺
-        
-        Args:
-            channel_name: 渠道名称
-            shop_id: 店铺ID
-            shop_name: 店铺名称
-            shop_logo: 店铺logo
-            description: 店铺描述
-            
-        Returns:
-            bool: 是否添加成功
-        """
-        session = self.get_session()
-        try:
-            # 获取对应渠道
+        """添加店铺"""
+        with self.session_scope() as session:
             channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
             if not channel:
                 self.logger.error(f"添加店铺失败: 渠道 {channel_name} 不存在")
                 return False
-            
-            # 检查店铺是否已存在
             existing = session.query(Shop).filter(
                 Shop.channel_id == channel.id,
                 Shop.shop_id == shop_id
             ).first()
-            
             if existing:
                 self.logger.warning(f"店铺 {shop_id} 已存在于渠道 {channel_name}")
                 return False
-            
-            # 创建新店铺
             shop = Shop(
                 channel_id=channel.id,
                 shop_id=shop_id,
@@ -199,42 +162,19 @@ class DatabaseManager:
                 shop_logo=shop_logo,
                 description=description
             )
-            
             session.add(shop)
-            session.commit()
             self.logger.info(f"成功添加店铺: {shop_name}({shop_id}) 到渠道 {channel_name}")
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"添加店铺失败: {str(e)}")
-            return False
-        finally:
-            session.close()
-    
+
     def get_shop(self, channel_name: str, shop_id: str) -> Optional[Dict[str, Any]]:
-        """获取店铺信息
-        
-        Args:
-            channel_name: 渠道名称
-            shop_id: 店铺ID
-            
-        Returns:
-            Optional[Dict]: 店铺信息或None
-        """
-        session = self.get_session()
-        try:
-            channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
+        """获取店铺信息"""
+        with self.session_scope() as session:
+            channel = self._get_channel(session, channel_name)
             if not channel:
                 return None
-                
-            shop = session.query(Shop).filter(
-                Shop.channel_id == channel.id,
-                Shop.shop_id == shop_id
-            ).first()
-            
+            shop = self._get_shop(session, channel, shop_id)
             if not shop:
                 return None
-                
             return {
                 'id': shop.id,
                 'channel_id': shop.channel_id,
@@ -244,27 +184,13 @@ class DatabaseManager:
                 'shop_logo': shop.shop_logo,
                 'description': shop.description,
             }
-        except SQLAlchemyError as e:
-            self.logger.error(f"获取店铺失败: {str(e)}")
-            return None
-        finally:
-            session.close()
-    
+
     def get_shops_by_channel(self, channel_name: str) -> List[Dict[str, Any]]:
-        """获取指定渠道下的所有店铺
-        
-        Args:
-            channel_name: 渠道名称
-            
-        Returns:
-            List[Dict]: 店铺列表
-        """
-        session = self.get_session()
-        try:
-            channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
+        """获取指定渠道下的所有店铺"""
+        with self.session_scope() as session:
+            channel = self._get_channel(session, channel_name)
             if not channel:
                 return []
-                
             shops = session.query(Shop).filter(Shop.channel_id == channel.id).all()
             return [
                 {
@@ -278,133 +204,52 @@ class DatabaseManager:
                 }
                 for shop in shops
             ]
-        except SQLAlchemyError as e:
-            self.logger.error(f"获取店铺列表失败: {str(e)}")
-            return []
-        finally:
-            session.close()
-    
+
     def update_shop_info(self, channel_name: str, shop_id: str, shop_name: str = None, shop_logo: str = None, description: str = None) -> bool:
-        """更新店铺信息
-        
-        Args:
-            channel_name: 渠道名称
-            shop_id: 新的店铺ID
-            shop_name: 新的店铺名称
-            shop_logo: 新的店铺logo
-            description: 新的店铺描述
-            
-        Returns:
-            bool: 是否更新成功
-        """
-        session = self.get_session()
-        try:
-            channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
+        """更新店铺信息"""
+        with self.session_scope() as session:
+            channel = self._get_channel(session, channel_name)
             if not channel:
                 return False
-                
-            shop = session.query(Shop).filter(
-                Shop.channel_id == channel.id,
-                Shop.shop_id == shop_id
-            ).first()
-            
+            shop = self._get_shop(session, channel, shop_id)
             if not shop:
                 return False
-            
-            if shop_id is not None:
-                shop.shop_id = shop_id
             if shop_name is not None:
                 shop.shop_name = shop_name
             if shop_logo is not None:
                 shop.shop_logo = shop_logo
             if description is not None:
                 shop.description = description
-                
-            session.commit()
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"更新店铺信息失败: {str(e)}")
-            return False
-        finally:
-            session.close()
-    
+
     def delete_shop(self, channel_name: str, shop_id: str) -> bool:
-        """删除店铺
-        
-        Args:
-            channel_name: 渠道名称
-            shop_id: 店铺ID
-        Returns:
-            bool: 是否删除成功
-        """
-        session = self.get_session()
-        try:
-            channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
+        """删除店铺"""
+        with self.session_scope() as session:
+            channel = self._get_channel(session, channel_name)
             if not channel:
                 return False
-                
-            shop = session.query(Shop).filter(
-                Shop.channel_id == channel.id,
-                Shop.shop_id == shop_id
-            ).first()
-            
+            shop = self._get_shop(session, channel, shop_id)
             if not shop:
                 return False
-                
             session.delete(shop)
-            session.commit()
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"删除店铺失败: {str(e)}")
-            return False
-        finally:
-            session.close()
 
-    # 账号相关操作
+    # ==================== 账号相关操作 ====================
     def add_account(self, channel_name: str, shop_id: str, user_id: str, username: str, password: str, cookies: str = None) -> bool:
-        """添加账号
-        
-        Args:
-            channel_name: 渠道名称
-            shop_id: 店铺ID
-            user_id: 用户ID
-            username: 登录用户名
-            password: 登录密码
-            cookies: cookies JSON字符串
-            
-        Returns:
-            bool: 是否添加成功
-        """
-        session = self.get_session()
-        try:
-            # 获取对应店铺
-            channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
+        """添加账号"""
+        with self.session_scope() as session:
+            channel = self._get_channel(session, channel_name)
             if not channel:
                 self.logger.error(f"添加账号失败: 渠道 {channel_name} 不存在")
                 return False
-                
-            shop = session.query(Shop).filter(
-                Shop.channel_id == channel.id,
-                Shop.shop_id == shop_id
-            ).first()
-            
+            shop = self._get_shop(session, channel, shop_id)
             if not shop:
                 self.logger.error(f"添加账号失败: 店铺 {shop_id} 不存在")
                 return False
-            
-            # 检查账号是否已存在
-            existing = session.query(Account).filter(
-                Account.shop_id == shop.id,
-                Account.username == username
-            ).first()
-            
+            existing = self._get_account_by_username(session, shop, username)
             if existing:
                 self.logger.warning(f"账号 {username} 已存在于店铺 {shop_id}")
                 return False
-            
-            # 创建新账号
             account = Account(
                 shop_id=shop.id,
                 user_id=user_id,
@@ -413,53 +258,25 @@ class DatabaseManager:
                 cookies=cookies,
                 status=None
             )
-            
             session.add(account)
-            session.commit()
             self.logger.info(f"成功添加账号: {username} 到店铺 {shop_id}")
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"添加账号失败: {str(e)}")
-            return False
-        finally:
-            session.close()
-    
-    def get_account(self, channel_name: str, shop_id: str,user_id: str) -> Optional[Dict[str, Any]]:
-        """获取账号信息
-        
-        Args:
-            channel_name: 渠道名称
-            shop_id: 店铺ID
-            user_id: 用户ID
-        Returns:
-            Optional[Dict]: 账号信息或None
-        """
-        session = self.get_session()
-        try:
-            channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
+
+    def get_account(self, channel_name: str, shop_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        """获取账号信息"""
+        with self.session_scope() as session:
+            channel = self._get_channel(session, channel_name)
             if not channel:
                 self.logger.warning(f"未找到渠道: {channel_name}")
                 return None
-                
-            shop = session.query(Shop).filter(
-                Shop.channel_id == channel.id,
-                Shop.shop_id == shop_id
-            ).first()
-            
+            shop = self._get_shop(session, channel, shop_id)
             if not shop:
                 self.logger.warning(f"未找到店铺: {shop_id} (渠道: {channel_name})")
                 return None
-                
-            account = session.query(Account).filter(
-                Account.shop_id == shop.id,
-                Account.user_id == user_id
-            ).first()
-            
+            account = self._get_account_by_user_id(session, shop, user_id)
             if not account:
                 self.logger.warning(f"未找到账户: {user_id} (店铺 ID: {shop_id})")
                 return None
-                
             return {
                 'id': account.id,
                 'shop_id': account.shop_id,
@@ -469,52 +286,22 @@ class DatabaseManager:
                 'cookies': account.cookies,
                 'status': account.status
             }
-        except SQLAlchemyError as e:
-            self.logger.error(f"获取账号失败: {str(e)}")
-            return None
-        finally:
-            session.close()
-    
+
     def update_account_info(self, channel_name: str, shop_id: str, user_id: str, username: Optional[str] = None, password: Optional[str] = None, cookies: Optional[str] = None, status: Optional[int] = None) -> bool:
-        """更新账号信息
-        
-        Args:
-            channel_name: 渠道名称
-            shop_id: 店铺ID
-            user_id: 用户ID
-            username: 登录用户名
-            password: 登录密码
-            cookies: cookies JSON字符串
-            status: 账号状态
-        Returns:
-            bool: 是否更新成功
-        """
-        session = self.get_session()
-        try:
-            channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
+        """更新账号信息"""
+        with self.session_scope() as session:
+            channel = self._get_channel(session, channel_name)
             if not channel:
                 self.logger.error(f"更新账号失败: 渠道 {channel_name} 不存在")
                 return False
-                
-            shop = session.query(Shop).filter(
-                Shop.channel_id == channel.id,
-                Shop.shop_id == shop_id
-            ).first()
-            
+            shop = self._get_shop(session, channel, shop_id)
             if not shop:
                 self.logger.error(f"更新账号失败: 店铺 {shop_id} 不存在于渠道 {channel_name}")
                 return False
-                
-            account = session.query(Account).filter(
-                Account.shop_id == shop.id,
-                Account.user_id == user_id
-            ).first()
-            
+            account = self._get_account_by_user_id(session, shop, user_id)
             if not account:
                 self.logger.error(f"更新账号失败: 账号 {user_id} 不存在于店铺 {shop_id}")
                 return False
-                
-            # 更新账号信息
             if username is not None:
                 account.username = username
             if password is not None:
@@ -523,42 +310,18 @@ class DatabaseManager:
                 account.cookies = cookies
             if status is not None:
                 account.status = status
-
-            session.commit()
             self.logger.info(f"成功更新账号信息: {username} (用户ID: {user_id})")
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"更新账号信息失败: {str(e)}")
-            return False
-        finally:
-            session.close()
-                
 
     def get_accounts_by_shop(self, channel_name: str, shop_id: str) -> List[Dict[str, Any]]:
-        """获取指定店铺下的所有账号
-        
-        Args:
-            channel_name: 渠道名称
-            shop_id: 店铺ID
-            
-        Returns:
-            List[Dict]: 账号列表
-        """
-        session = self.get_session()
-        try:
-            channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
+        """获取指定店铺下的所有账号"""
+        with self.session_scope() as session:
+            channel = self._get_channel(session, channel_name)
             if not channel:
                 return []
-                
-            shop = session.query(Shop).filter(
-                Shop.channel_id == channel.id,
-                Shop.shop_id == shop_id
-            ).first()
-            
+            shop = self._get_shop(session, channel, shop_id)
             if not shop:
                 return []
-                
             accounts = session.query(Account).filter(Account.shop_id == shop.id).all()
             return [
                 {
@@ -572,207 +335,110 @@ class DatabaseManager:
                 }
                 for account in accounts
             ]
-        except SQLAlchemyError as e:
-            self.logger.error(f"获取账号列表失败: {str(e)}")
-            return []
-        finally:
-            session.close()
-    
+
+    def get_all_accounts_with_details(self) -> List[Dict[str, Any]]:
+        """
+        批量获取所有账号及其关联的店铺和渠道信息（减少N+1查询）
+
+        Returns:
+            List[Dict]: 包含 channel_name, shop_id, shop_name, shop_logo, username, password, status, user_id, cookies
+        """
+        with self.session_scope() as session:
+            # 使用 join 一次性查询所有数据
+            results = (
+                session.query(Account, Shop, Channel)
+                .join(Shop, Account.shop_id == Shop.id)
+                .join(Channel, Shop.channel_id == Channel.id)
+                .all()
+            )
+
+            return [
+                {
+                    'channel_name': channel.channel_name,
+                    'shop_id': shop.shop_id,
+                    'shop_name': shop.shop_name,
+                    'shop_logo': shop.shop_logo,
+                    'username': account.username,
+                    'password': account.password,
+                    'status': account.status,
+                    'user_id': account.user_id,
+                    'cookies': account.cookies
+                }
+                for account, shop, channel in results
+            ]
+
     def update_account_status(self, channel_name: str, shop_id: str, user_id: str, status: int) -> bool:
-        """更新账号状态
-        
-        Args:
-            channel_name: 渠道名称
-            shop_id: 店铺ID
-            user_id: 用户ID
-            status: 状态值 (0-未验证, 1-正常, 2-异常)
-            
-        Returns:
-            bool: 是否更新成功
-        """
-        session = self.get_session()
-        try:
-            channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
+        """更新账号状态"""
+        with self.session_scope() as session:
+            channel = self._get_channel(session, channel_name)
             if not channel:
                 return False
-                
-            shop = session.query(Shop).filter(
-                Shop.channel_id == channel.id,
-                Shop.shop_id == shop_id
-            ).first()
-            
+            shop = self._get_shop(session, channel, shop_id)
             if not shop:
                 return False
-                
-            account = session.query(Account).filter(
-                Account.shop_id == shop.id,
-                Account.user_id == user_id
-            ).first()
-            
+            account = self._get_account_by_user_id(session, shop, user_id)
             if not account:
                 return False
-                
             account.status = status
-            session.commit()
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"更新账号状态失败: {str(e)}")
-            return False
-        finally:
-            session.close()
-    
+
     def update_account_cookies(self, channel_name: str, shop_id: str, user_id: str, cookies: str) -> bool:
-        """更新账号cookies
-        
-        Args:
-            channel_name: 渠道名称
-            shop_id: 店铺ID
-            user_id: 用户ID
-            cookies: cookies JSON字符串
-            
-        Returns:
-            bool: 是否更新成功
-        """
-        session = self.get_session()
-        try:
-            channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
+        """更新账号cookies"""
+        with self.session_scope() as session:
+            channel = self._get_channel(session, channel_name)
             if not channel:
                 return False
-                
-            shop = session.query(Shop).filter(
-                Shop.channel_id == channel.id,
-                Shop.shop_id == shop_id
-            ).first()
-            
+            shop = self._get_shop(session, channel, shop_id)
             if not shop:
                 return False
-                
-            account = session.query(Account).filter(
-                Account.shop_id == shop.id,
-                Account.user_id == user_id
-            ).first()
-            
+            account = self._get_account_by_user_id(session, shop, user_id)
             if not account:
                 return False
-                
             account.cookies = cookies
-            session.commit()
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"更新账号cookies失败: {str(e)}")
-            return False
-        finally:
-            session.close()
-    
+
     def delete_account(self, channel_name: str, shop_id: str, user_id: str) -> bool:
-        """删除账号
-        
-        Args:
-            channel_name: 渠道名称
-            shop_id: 店铺ID
-            user_id: 用户ID
-            
-        Returns:
-            bool: 是否删除成功
-        """
-        session = self.get_session()
-        try:
-            channel = session.query(Channel).filter(Channel.channel_name == channel_name).first()
+        """删除账号"""
+        with self.session_scope() as session:
+            channel = self._get_channel(session, channel_name)
             if not channel:
                 return False
-                
-            shop = session.query(Shop).filter(
-                Shop.channel_id == channel.id,
-                Shop.shop_id == shop_id
-            ).first()
-            
+            shop = self._get_shop(session, channel, shop_id)
             if not shop:
                 return False
-                
-            account = session.query(Account).filter(
-                Account.shop_id == shop.id,
-                Account.user_id == user_id
-            ).first()
-            
+            account = self._get_account_by_user_id(session, shop, user_id)
             if not account:
                 return False
-                
             session.delete(account)
-            session.commit()
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"删除账号失败: {str(e)}")
-            return False
-        finally:
-            session.close()
 
     # 关键词相关操作
     def add_keyword(self, keyword: str) -> bool:
-        """添加关键词
-        
-        Args:
-            keyword: 关键词
-            
-        Returns:
-            bool: 是否添加成功
-        """
-        session = self.get_session()
-        try:
-            # 检查关键词是否已存在
+        """添加关键词"""
+        with self.session_scope() as session:
             existing = session.query(Keyword).filter(Keyword.keyword == keyword).first()
             if existing:
                 self.logger.warning(f"关键词 {keyword} 已存在")
                 return False
-                
-            # 创建新关键词
             keyword_obj = Keyword(keyword=keyword)
             session.add(keyword_obj)
-            session.commit()
             self.logger.info(f"成功添加关键词: {keyword}")
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"添加关键词失败: {str(e)}")
-            return False
-        finally:
-            session.close()
-    
+
     def get_keyword(self, keyword: str) -> Optional[Dict[str, Any]]:
-        """获取关键词信息
-        
-        Args:
-            keyword: 关键词
-            
-        Returns:
-            Optional[Dict]: 关键词信息或None
-        """
-        session = self.get_session()
-        try:
+        """获取关键词信息"""
+        with self.session_scope() as session:
             keyword_obj = session.query(Keyword).filter(Keyword.keyword == keyword).first()
             if not keyword_obj:
                 return None
-                
             return {
                 'id': keyword_obj.id,
                 'keyword': keyword_obj.keyword
             }
-        except SQLAlchemyError as e:
-            self.logger.error(f"获取关键词失败: {str(e)}")
-            return None
-        finally:
-            session.close()
-    
+
     def get_all_keywords(self) -> List[Dict[str, Any]]:
-        """获取所有关键词
-        
-        Returns:
-            List[Dict]: 关键词列表
-        """
-        session = self.get_session()
-        try:
+        """获取所有关键词"""
+        with self.session_scope() as session:
             keywords = session.query(Keyword).all()
             return [
                 {
@@ -781,75 +447,33 @@ class DatabaseManager:
                 }
                 for keyword in keywords
             ]
-        except SQLAlchemyError as e:
-            self.logger.error(f"获取关键词列表失败: {str(e)}")
-            return []
-        finally:
-            session.close()
-    
+
     def update_keyword(self, old_keyword: str, new_keyword: str) -> bool:
-        """更新关键词
-        
-        Args:
-            old_keyword: 原关键词
-            new_keyword: 新关键词
-            
-        Returns:
-            bool: 是否更新成功
-        """
-        session = self.get_session()
-        try:
-            # 检查原关键词是否存在
+        """更新关键词"""
+        with self.session_scope() as session:
             keyword_obj = session.query(Keyword).filter(Keyword.keyword == old_keyword).first()
             if not keyword_obj:
                 self.logger.warning(f"关键词 {old_keyword} 不存在")
                 return False
-            
-            # 检查新关键词是否已存在（如果不是同一个关键词）
             if old_keyword != new_keyword:
                 existing = session.query(Keyword).filter(Keyword.keyword == new_keyword).first()
                 if existing:
                     self.logger.warning(f"关键词 {new_keyword} 已存在")
                     return False
-                    
-            # 更新关键词
             keyword_obj.keyword = new_keyword
-            session.commit()
             self.logger.info(f"成功更新关键词: {old_keyword} -> {new_keyword}")
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"更新关键词失败: {str(e)}")
-            return False
-        finally:
-            session.close()
 
     def delete_keyword(self, keyword: str) -> bool:
-        """删除关键词
-        
-        Args:
-            keyword: 关键词
-            
-        Returns:
-            bool: 是否删除成功
-        """
-        session = self.get_session()
-        try:
+        """删除关键词"""
+        with self.session_scope() as session:
             keyword_obj = session.query(Keyword).filter(Keyword.keyword == keyword).first()
             if not keyword_obj:
                 self.logger.warning(f"关键词 {keyword} 不存在")
                 return False
-                
             session.delete(keyword_obj)
-            session.commit()
             self.logger.info(f"成功删除关键词: {keyword}")
             return True
-        except SQLAlchemyError as e:
-            session.rollback()
-            self.logger.error(f"删除关键词失败: {str(e)}")
-            return False
-        finally:
-            session.close()
 
 _db_instance = None
 
@@ -860,7 +484,12 @@ def get_db_manager() -> "DatabaseManager":
     return _db_instance
 
 class _LazyDBProxy:
-    def __getattr__(self, name):
-        return getattr(get_db_manager(), name)
+    """延迟代理，用于兼容旧代码的全局 db_manager 实例"""
+    _instance: Optional["DatabaseManager"] = None
+
+    def __getattr__(self, name: str):
+        if _LazyDBProxy._instance is None:
+            _LazyDBProxy._instance = get_db_manager()
+        return getattr(_LazyDBProxy._instance, name)
 
 db_manager = _LazyDBProxy()

@@ -17,9 +17,10 @@ class BaseHandler(MessageHandler):
         self.name = name or self.__class__.__name__
 
     async def log_message(self, context: Context, action: str, extra_info: str = ""):
-        """统一的日志记录"""
+        """统一的日志记录（不记录完整内容以保护隐私）"""
         user_info = self._get_user_info(context)
-        self.logger.info(f"{self.name} {action} - {user_info} - {context.content}... {extra_info}")
+        content_preview = str(context.content)[:50] + "..." if context.content else ""
+        self.logger.info(f"{self.name} {action} - {user_info} - {content_preview} {extra_info}")
 
     def _get_user_info(self, context: Context) -> str:
         """提取用户信息"""

@@ -34,11 +34,11 @@ class MainWindow(FluentWindow):
         self.logger.info(f"  基础属性初始化: {time.perf_counter()-t:.2f}s")
 
         # 延迟加载的视图
+        self.knowledge_view = None
         self.monitor_view = None
         self.keyword_manager_view = None
         self.user_manager_view = None
         self.log_view = None
-        self.knowledge_view = None
         self.settingInterface = None
 
         t = time.perf_counter()
@@ -71,7 +71,6 @@ class MainWindow(FluentWindow):
         t = time.perf_counter()
         from ui.Knowledge_ui import KnowledgeUI
         self.logger.info(f"  import KnowledgeUI: {time.perf_counter()-t:.2f}s")
-
         t = time.perf_counter()
         self.monitor_view = AutoReplyUI(self)
         self.logger.info(f"  AutoReplyUI: {time.perf_counter()-t:.2f}s")
@@ -85,11 +84,11 @@ class MainWindow(FluentWindow):
         self.log_view = LogUI(self)
         self.logger.info(f"  LogUI: {time.perf_counter()-t:.2f}s")
         t = time.perf_counter()
-        self.settingInterface = SettingUI(self)
-        self.logger.info(f"  SettingUI: {time.perf_counter()-t:.2f}s")
-        t = time.perf_counter()
         self.knowledge_view = KnowledgeUI(self)
         self.logger.info(f"  KnowledgeUI: {time.perf_counter()-t:.2f}s")
+        t = time.perf_counter()
+        self.settingInterface = SettingUI(self)
+        self.logger.info(f"  SettingUI: {time.perf_counter()-t:.2f}s")
 
         # 初始化导航
         self.initNavigation()
@@ -102,8 +101,7 @@ class MainWindow(FluentWindow):
         self.addSubInterface(self.monitor_view, FIF.CHAT, '自动回复')
         self.addSubInterface(self.keyword_manager_view, FIF.EDIT, '关键词管理')
         self.addSubInterface(self.user_manager_view, FIF.PEOPLE, '账号管理')
-        self.addSubInterface(self.knowledge_view, FIF.LIBRARY, '知识库管理')
-        self.addSubInterface(self.log_view, FIF.HISTORY, '日志管理')
+        self.addSubInterface(self.knowledge_view, FIF.DOCUMENT, '知识库')
         # 添加二维码按钮
         self.navigationInterface.addItem(
             routeKey='contact_us',
@@ -113,9 +111,9 @@ class MainWindow(FluentWindow):
             selectable=False,
             position=NavigationItemPosition.BOTTOM
         )
-        
+        self.addSubInterface(self.log_view, FIF.HISTORY, '日志管理', NavigationItemPosition.BOTTOM)
         self.addSubInterface(self.settingInterface, FIF.SETTING, '设置', NavigationItemPosition.BOTTOM)
-        
+
 
     # 初始化窗口
     def initWindow(self):

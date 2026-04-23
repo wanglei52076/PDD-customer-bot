@@ -35,7 +35,7 @@ temp/
 tmp/
 *.tmp
 *.temp
-
+test/
 # IDE and editor files
 .vscode/
 .idea/
@@ -55,3 +55,6 @@ Thumbs.db
 .DS_Store
 .spec-workflow/
 chroma_db/
+CLAUDE.md
+# CI/CD (not published to this mirror)
+.github/

@@ -99,16 +99,17 @@ class CatchAllHandler(MessageHandler):
         return True
 
     async def handle(self, context: Context, metadata: Dict[str, Any]) -> bool:
-        """记录所有消息，用于调试和统计"""
+        """记录所有消息，用于调试和统计（不记录完整内容以保护隐私）"""
         user_id = metadata.get('user_id', 'unknown')
         message_id = metadata.get('message_id', 'unknown')
+        content_preview = str(context.content)[:50] + "..." if context.content else ""
 
         self.logger.info(f"=== 消息处理记录 ===")
         self.logger.info(f"用户ID: {user_id}")
         self.logger.info(f"消息ID: {message_id}")
         self.logger.info(f"消息类型: {context.type}")
         self.logger.info(f"渠道类型: {context.channel_type}")
-        self.logger.info(f"消息内容: {context.content}")
+        self.logger.info(f"消息内容预览: {content_preview}")
         self.logger.info(f"消息已被CatchAllHandler处理")
         self.logger.info(f"===================")
 

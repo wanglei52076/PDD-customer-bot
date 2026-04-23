@@ -1,19 +1,20 @@
 # 账号管理界面
 
 import asyncio
+from typing import Any, Dict, Optional
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSignal as Signal, QTimer
-from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QVBoxLayout, QWidget, QSizePolicy, QLabel,
-                            QInputDialog, QMessageBox, QComboBox, QDialog, QFormLayout)
-from PyQt6.QtGui import QFont, QIcon, QPixmap, QPainter, QPainterPath
-from qfluentwidgets import (CardWidget, SubtitleLabel, CaptionLabel, BodyLabel, 
-                           PrimaryPushButton, PushButton, StrongBodyLabel, 
+from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QVBoxLayout, QWidget, QLabel,
+                            QMessageBox, QDialog, QFormLayout)
+from PyQt6.QtGui import QFont, QPixmap, QPainter, QPainterPath
+from qfluentwidgets import (CardWidget, SubtitleLabel, CaptionLabel, BodyLabel,
+                           PrimaryPushButton, PushButton, StrongBodyLabel,
                            InfoBadge, ScrollArea, FluentIcon as FIF)
 from database.db_manager import db_manager
 from Channel.pinduoduo.pdd_login import login_pdd
 from utils.logger_loguru import get_logger
 import requests
 
-logger = get_logger()
+logger = get_logger("UserUI")
 
 class LogoLoaderThread(QThread):
     """异步加载Logo的线程"""
@@ -554,7 +555,7 @@ class UserManagerWidget(QFrame):
         )
         self.login_thread.start()
     
-    def onLoginFinished(self, account_card: AccountCard, account_data: dict, result: object):
+    def onLoginFinished(self, account_card: AccountCard, account_data: dict, result: Optional[Dict[str, Any]]):
         """登录完成回调"""
         # 恢复验证按钮状态
         account_card.setVerifyStatus(False)
@@ -617,7 +618,7 @@ class UserManagerWidget(QFrame):
             self.add_account_thread.login_finished.connect(self.onAddAccountLoginFinished)
             self.add_account_thread.start()
 
-    def onAddAccountLoginFinished(self, result: object):
+    def onAddAccountLoginFinished(self, result: Optional[Dict[str, Any]]):
         """处理添加账号时的登录结果"""
         # 恢复添加按钮状态
         self.add_btn.setEnabled(True)

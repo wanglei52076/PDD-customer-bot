@@ -305,7 +305,7 @@ def main():
             # 设置控制台输出编码
             kernel32 = ctypes.windll.kernel32
             kernel32.SetConsoleOutputCP(65001)  # UTF-8
-        except:
+        except (OSError, AttributeError):
             pass
 
     parser = argparse.ArgumentParser(

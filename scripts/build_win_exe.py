@@ -52,7 +52,6 @@ def main():
         "--noconfirm",
         "--distpath", "dist",
         "--workpath", "build",
-        "--specpath", "scripts",
         "--clean",
         "scripts/agent_customer.spec",
     ]

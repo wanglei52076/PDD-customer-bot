@@ -20,7 +20,6 @@
 """
 import sys
 import ctypes
-import asyncio
 import os
 from pathlib import Path
 from PyQt6.QtCore import Qt, QTimer
@@ -63,8 +62,8 @@ def setup_playwright_browsers_path():
     os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_path)
     return browsers_path
 
-async def main():
-    """ 应用程序主函数 """
+def main():
+    """应用程序主函数"""
     # 设置 Playwright 浏览器路径
     browsers_path = setup_playwright_browsers_path()
 
@@ -89,9 +88,8 @@ async def main():
     # 将窗口设为应用级别的变量，防止被垃圾回收
     app.main_window = window
 
-
-    # 运行事件循环
+    # 运行 Qt 事件循环
     sys.exit(app.exec())
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
