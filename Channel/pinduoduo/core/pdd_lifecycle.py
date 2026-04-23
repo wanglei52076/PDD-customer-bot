@@ -120,7 +120,7 @@ class LifecycleMixin:
                 "access_token": access_token,
                 "role": "mall_cs",
                 "client": "web",
-                "version": PDDChannel.API_VERSION
+                "version": self.API_VERSION
             }
             query = "&".join([f"{k}={v}" for k, v in params.items()])
             full_url = f"{self.base_url}?{query}"
@@ -431,6 +431,5 @@ class LifecycleMixin:
 # 延迟导入避免循环依赖
 from database import db_manager
 from core.connection_status import ConnectionState
-from Channel.channel import Channel as PDDChannel
 
 __all__ = ['LifecycleMixin']

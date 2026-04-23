@@ -15,7 +15,6 @@ class DatabaseManager:
     单例管理：通过 DI 容器注册为单例（推荐方式）。
     也支持通过 get_db_manager() 函数获取单例实例。
     """
-    _initialized = False
 
     def __init__(self, db_path: str = './temp/channel_shop.db'):
         """初始化数据库连接
@@ -23,11 +22,6 @@ class DatabaseManager:
         Args:
             db_path: 数据库文件路径
         """
-        if DatabaseManager._initialized:
-            return
-
-        DatabaseManager._initialized = True
-
         # 确保数据库目录存在
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
@@ -475,21 +469,30 @@ class DatabaseManager:
             self.logger.info(f"成功删除关键词: {keyword}")
             return True
 
-_db_instance = None
+_db_instance: Optional["DatabaseManager"] = None
 
 def get_db_manager() -> "DatabaseManager":
+    """获取 DatabaseManager 单例。
+
+    优先从 DI 容器获取；若 DI 尚未注册（启动早期），回退到本地单例，
+    以确保全应用始终共用同一个实例，避免出现多个 db 文件分裂。
+    """
     global _db_instance
+    try:
+        from core.di_container import container
+        if container.is_registered(DatabaseManager):
+            return container.get(DatabaseManager)
+    except ImportError:
+        pass
+
     if _db_instance is None:
         _db_instance = DatabaseManager()
     return _db_instance
 
 class _LazyDBProxy:
-    """延迟代理，用于兼容旧代码的全局 db_manager 实例"""
-    _instance: Optional["DatabaseManager"] = None
+    """延迟代理，用于兼容旧代码的全局 db_manager 实例，底层共用 DI 容器。"""
 
     def __getattr__(self, name: str):
-        if _LazyDBProxy._instance is None:
-            _LazyDBProxy._instance = get_db_manager()
-        return getattr(_LazyDBProxy._instance, name)
+        return getattr(get_db_manager(), name)
 
 db_manager = _LazyDBProxy()
