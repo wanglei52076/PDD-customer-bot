@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from collections import deque
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QAbstractTableModel, QModelIndex
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QAbstractTableModel, QModelIndex
 from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QWidget,
                             QTextEdit, QFileDialog, QMessageBox, QSplitter,
                             QTableView, QHeaderView, QApplication,
@@ -153,16 +153,6 @@ class LogModel(QAbstractTableModel):
         self._logs = deque(maxlen=10000)  # 使用循环缓冲区，最多保存10000条日志
         self._filtered_logs = []
         self._headers = ["时间", "级别", "模块", "文件", "消息"]
-        # 防抖：日志爆发时合并 layoutChanged，避免逐条触发全表重绘导致 UI 卡顿
-        self._dirty_timer = QTimer()
-        self._dirty_timer.setSingleShot(True)
-        self._dirty_timer.setInterval(80)
-        self._dirty_timer.timeout.connect(self.layoutChanged.emit)
-
-    def _schedule_changed(self):
-        """合并短时间内的多次变更，只触发一次 layoutChanged。"""
-        if not self._dirty_timer.isActive():
-            self._dirty_timer.start()
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._filtered_logs)
@@ -219,24 +209,23 @@ class LogModel(QAbstractTableModel):
         return None
 
     def add_log(self, level: str, message: str, record):
-        """添加日志"""
+        """添加日志（增量插入，保留滚动位置；避免 layoutChanged 把滚动重置回顶部）"""
         log_item = LogItem(level, message, record)
         self._logs.append(log_item)
 
-        # 如果没有过滤条件，直接添加到显示列表
-        if not hasattr(self, '_filter') or self._filter is None:
+        # 通过过滤则增量插入到显示列表末尾
+        passes = (not hasattr(self, '_filter') or self._filter is None) or self._filter(log_item)
+        if passes:
+            row = len(self._filtered_logs)
+            self.beginInsertRows(QModelIndex(), row, row)
             self._filtered_logs.append(log_item)
-        else:
-            # 检查是否通过过滤
-            if self._filter(log_item):
-                self._filtered_logs.append(log_item)
+            self.endInsertRows()
 
-        # 限制显示的日志数量
+        # 限制显示数量：超出则移除最旧的一条（同步通知视图）
         if len(self._filtered_logs) > 1000:
-            self._filtered_logs = self._filtered_logs[-1000:]
-
-        # 发出数据变更信号（防抖，合并爆发）
-        self._schedule_changed()
+            self.beginRemoveRows(QModelIndex(), 0, 0)
+            self._filtered_logs.pop(0)
+            self.endRemoveRows()
 
     def set_filter(self, filter_func=None):
         """设置过滤器"""
