@@ -37,6 +37,40 @@ class PDDLogin():
         self.base_url = "https://mms.pinduoduo.com/login"
         self.name = name
         self.password = password
+
+    # 本地浏览器启动参数（Chrome/Edge 通用）
+    _LAUNCH_ARGS = [
+        '--disable-gpu',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-notifications',
+        '--disable-web-security',
+        '--disable-features=VizDisplayCompositor',
+    ]
+
+    async def _launch_context(self, playwright, user_data_dir: str, headless: bool):
+        """启动用户本地的浏览器，避免下载 Playwright 自带的 Chromium。
+
+        优先 Google Chrome，其次 Microsoft Edge（Windows 自带）；
+        都不可用时抛出明确错误，提示用户安装。
+        """
+        last_error = None
+        for channel in ("chrome", "msedge"):
+            try:
+                return await playwright.chromium.launch_persistent_context(
+                    user_data_dir,
+                    channel=channel,
+                    headless=headless,
+                    args=self._LAUNCH_ARGS,
+                )
+            except Exception as e:
+                last_error = e
+                self.logger.warning(f"启动本地浏览器 {channel} 失败: {e}")
+        raise RuntimeError(
+            "未找到可用的本地浏览器（Chrome/Edge）。请安装 Google Chrome 或 Microsoft Edge 后重试。"
+        ) from last_error
+
     async def login(self, headless=False):
         """使用账号密码登录
 
@@ -52,20 +86,8 @@ class PDDLogin():
             user_data_dir = str(app_dir / "user_data" / self.name)
             self.logger.debug(f"使用用户数据目录: {user_data_dir}")
 
-            # 使用持久化上下文，自动处理用户数据目录
-            context = await playwright.chromium.launch_persistent_context(
-                user_data_dir,
-                headless=headless,
-                args=[
-                    '--disable-gpu',
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-notifications',  # 禁用通知
-                    '--disable-web-security',
-                    '--disable-features=VizDisplayCompositor'
-                ]
-            )
+            # 使用本地浏览器（Chrome/Edge），无需下载 Playwright 自带 Chromium
+            context = await self._launch_context(playwright, user_data_dir, headless=headless)
             
             page = await context.new_page()
             
@@ -126,20 +148,8 @@ class PDDLogin():
                 self.logger.error(f"用户数据目录不存在: {user_data_dir}，请先登录")
                 return False
 
-            # 使用持久化上下文，自动加载用户数据
-            context = await playwright.chromium.launch_persistent_context(
-                user_data_dir,
-                headless=True,  # 刷新cookies时可以使用无头模式
-                args=[
-                    '--disable-gpu',
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-notifications',
-                    '--disable-web-security',
-                    '--disable-features=VizDisplayCompositor'
-                ]
-            )
+            # 使用本地浏览器（Chrome/Edge），无需下载 Playwright 自带 Chromium
+            context = await self._launch_context(playwright, user_data_dir, headless=True)
 
             page = await context.new_page()
 
