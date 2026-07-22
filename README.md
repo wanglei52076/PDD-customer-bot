@@ -2,6 +2,18 @@
 
 电商AI客服桌面应用程序，基于 PyQt6 构建，支持多平台渠道集成，集成 AI 大模型实现智能自动回复。
 
+## 下载安装
+
+> 普通用户无需配置 Python 环境，直接下载安装包即可使用。
+
+**下载地址**：<https://github.com/JC0v0/Customer-Agent/releases/latest>
+
+在页面的 **Assets** 中下载 `Agent-Customer-Setup-<版本号>.exe`（约 100 MB），双击运行即可安装。
+
+- 安装到用户目录，**无需管理员权限**
+- 双击安装向导（中文）→ 桌面快捷方式 → 装完即用
+- 安装包已内置 Playwright 驱动，添加账号时自动调用本机已安装的 **Chrome 或 Edge** 浏览器完成登录，无需额外安装 Playwright 或 Chromium
+
 ## 功能特性
 
 - **多渠道支持**：目前支持拼多多平台 WebSocket 实时消息接收
@@ -63,7 +75,7 @@ python app.py
 
 > 例如：修改 `product_manager.py` 的商品列表接口时，先用 curl 测试接口，确认数据在 `result.onSaleGoods` 字段而非 `result.goodsList`，字段名为驼峰 `goodsId` 而非下划线 `goods_id`，价格单位是"分"需除以 100 转换为"元"
 
-## 构建 Windows 可执行文件
+## 构建 Windows 安装包
 
 在 Windows 上运行：
 
@@ -71,7 +83,25 @@ python app.py
 python scripts/build_win_exe.py --clean
 ```
 
-打包产物位于 `dist/AgentCustomer/` 目录。
+该命令会依次完成：
+
+1. 用 PyInstaller 打包应用（产物 `dist/AgentCustomer/`，含内置 Playwright 驱动）
+2. 调用 Inno Setup 压缩为单个安装程序（产物 `dist/installer/Agent-Customer-Setup-<版本号>.exe`）
+
+版本号自动从最近的 git tag 读取（去掉前导 `v`），也可用环境变量 `APP_VERSION` 指定。
+
+> 若仅需 PyInstaller 的 onedir 目录、不生成安装程序，加 `--skip-installer`。
+
+### CI 自动构建
+
+推送 `v*` 格式的 tag 会触发 GitHub Actions 自动构建并发布 Release：
+
+```bash
+git tag v1.4
+git push origin v1.4
+```
+
+构建产物（`Agent-Customer-Setup-<版本号>.exe`）会自动上传到该 tag 对应的 Release 页，即上文「下载安装」的来源。
 
 ## 项目结构
 
@@ -89,9 +119,10 @@ Agent-Customer/
 ├── Message/                # 消息处理（队列 + 处理器链）
 │   ├── core/               # consumer / handlers / queue
 │   └── handlers/           # 预处理器、AI、关键词处理器
-├── bridge/                 # 桥接模块（Context/Reply）
-├── core/                   # 核心服务（DI 容器、缓存、连接状态）
+├── bridge/                 # 桥接模块（Context/Reply/SendService）
+├── core/                   # 核心服务（DI 容器、连接状态）
 ├── database/               # 数据库（SQLAlchemy + 知识服务 + 商品同步）
+├── service/                # 服务层（账号/关键词服务薄封装）
 ├── ui/                     # PyQt6 用户界面
 ├── utils/                  # 工具模块（日志、路径等）
 ├── scripts/                # 构建脚本
