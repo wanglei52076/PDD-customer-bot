@@ -56,6 +56,9 @@ class _CdpContextHandle:
 
     connect_over_cdp 返回的 BrowserContext.close() 只断开 Playwright 连接，
     不会关闭我们用 subprocess 拉起的浏览器进程，需在此兜底。
+
+    Edge 是多进程的，proc.terminate() 只杀主进程，渲染/GPU/网络等子进程会
+    残留为孤儿进程，浏览器窗口不关闭。改用 taskkill /T /F 杀整棵进程树。
     """
 
     def __init__(self, context, proc):
@@ -73,8 +76,12 @@ class _CdpContextHandle:
             pass
         if self._proc and self._proc.poll() is None:
             try:
-                self._proc.terminate()
-                self._proc.wait(timeout=5)
+                # 杀整棵进程树（主进程 + 所有 Edge 子进程），
+                # 避免 terminate() 只杀主进程留下孤儿进程导致浏览器不关闭。
+                subprocess.run(
+                    ["taskkill", "/T", "/F", "/PID", str(self._proc.pid)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
             except Exception:
                 try:
                     self._proc.kill()
