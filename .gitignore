@@ -56,5 +56,7 @@ Thumbs.db
 .spec-workflow/
 chroma_db/
 CLAUDE.md
-# CI/CD (not published to this mirror)
-.github/
+# CI/CD：忽略 .github/ 下其他内容，但放行 workflows（自动化打包需要）
+.github/*
+!.github/workflows/
+!.github/workflows/**
