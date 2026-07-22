@@ -9,7 +9,7 @@ from qfluentwidgets import (SubtitleLabel, CaptionLabel, BodyLabel,
                            PrimaryPushButton, PushButton, 
                            ScrollArea, FluentIcon as FIF,
                            TableWidget)
-from database.db_manager import db_manager
+from service.keyword_service import keyword_service
 
 
 class KeywordTableWidget(TableWidget):
@@ -172,7 +172,7 @@ class KeywordManagerWidget(QFrame):
         """从数据库加载关键词数据"""
         try:
             # 从数据库获取所有关键词
-            keywords = db_manager.get_all_keywords()
+            keywords = keyword_service.get_all_keywords()
             self.keywords_data = [{"keyword": kw["keyword"]} for kw in keywords]
             
             # 如果数据库为空，初始化示例关键词
@@ -196,7 +196,7 @@ class KeywordManagerWidget(QFrame):
         
         # 将示例关键词添加到数据库
         for keyword in sample_keywords:
-            if db_manager.add_keyword(keyword):
+            if keyword_service.add_keyword(keyword):
                 self.keywords_data.append({"keyword": keyword})
         
         self.refreshKeywordList()
@@ -252,7 +252,7 @@ class KeywordManagerWidget(QFrame):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 # 从数据库删除关键词
-                if db_manager.delete_keyword(keyword):
+                if keyword_service.delete_keyword(keyword):
                     print(f"成功删除关键词: {keyword}")
                     # 从本地数据中移除
                     self.keywords_data = [k for k in self.keywords_data if k["keyword"] != keyword]
@@ -274,7 +274,7 @@ class KeywordManagerWidget(QFrame):
                 return False
                 
             # 添加到数据库
-            if db_manager.add_keyword(keyword.strip()):
+            if keyword_service.add_keyword(keyword.strip()):
                 print(f"成功添加关键词: {keyword}")
                 # 添加到本地数据
                 self.keywords_data.append({"keyword": keyword.strip()})
@@ -291,7 +291,7 @@ class KeywordManagerWidget(QFrame):
         """移除关键词"""
         try:
             # 从数据库删除
-            if db_manager.delete_keyword(keyword):
+            if keyword_service.delete_keyword(keyword):
                 # 从本地数据中移除
                 self.keywords_data = [k for k in self.keywords_data if k["keyword"] != keyword]
                 self.refreshKeywordList()
@@ -315,7 +315,7 @@ class KeywordManagerWidget(QFrame):
                 return True
                 
             # 更新数据库
-            if db_manager.update_keyword(old_keyword, new_keyword.strip()):
+            if keyword_service.update_keyword(old_keyword, new_keyword.strip()):
                 print(f"成功更新关键词: {old_keyword} -> {new_keyword}")
                 
                 # 更新本地数据

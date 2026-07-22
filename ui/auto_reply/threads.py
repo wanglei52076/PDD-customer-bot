@@ -140,7 +140,7 @@ class SetStatusThread(QThread):
     def run(self):
         """在后台线程中执行状态更新"""
         from Channel.pinduoduo.utils.API.Set_up_online import AccountMonitor
-        from database.db_manager import db_manager
+        from service.account_service import account_service
 
         try:
             # 1. 调用API设置平台状态
@@ -163,7 +163,7 @@ class SetStatusThread(QThread):
                 return
 
             # 2. 更新数据库状态
-            db_success = db_manager.update_account_status(
+            db_success = account_service.update_account_status(
                 channel_name=self.account_data["channel_name"],
                 shop_id=self.account_data["shop_id"],
                 user_id=self.account_data["user_id"],

@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Dict, Any, Optional, Union, Generator
 from utils.logger_loguru import get_logger
+from utils.db_pragma import setup_sqlite_pragmas
 from database.models import Base, Channel, Shop, Account, Keyword
 
 
@@ -27,6 +28,7 @@ class DatabaseManager:
 
         # 创建数据库引擎
         self.engine = create_engine(f'sqlite:///{db_path}')
+        setup_sqlite_pragmas(self.engine)
         self.Session = sessionmaker(bind=self.engine)
 
         # 创建表结构

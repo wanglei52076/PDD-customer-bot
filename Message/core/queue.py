@@ -104,17 +104,37 @@ class SimpleMessageQueue:
         self.logger.info(f"Queue {self.name} closed")
 
     def _should_deduplicate(self, wrapper: MessageWrapper) -> bool:
-        """检查是否应该去重"""
-        if not self._deduplication_cache:
+        """检查是否应该去重
+
+        去重键优先使用消息自身的 msg_id（用于防 WebSocket 重投递同一消息）；
+        缺少 msg_id 时退回 from_uid + 渠道 + 内容，避免不同用户发送相同
+        文本（如“你好”）被误判为重复而丢弃。
+        """
+        # dedup 关闭时缓存为 None；启用时空集合是正常状态，不能提前返回，
+        # 否则首条消息永远进不了缓存、去重形同虚设。
+        if self._deduplication_cache is None:
             return False
 
-        content_str = str(wrapper.context.content) if wrapper.context.content is not None else ""
-        content_hash = hashlib.md5(content_str.encode("utf-8")).hexdigest()
-        if content_hash in self._deduplication_cache:
+        kwargs = getattr(wrapper.context, "kwargs", None)
+        msg_id = getattr(kwargs, "msg_id", None) if kwargs is not None else None
+
+        if msg_id:
+            dedup_key = f"mid:{msg_id}"
+        else:
+            from_uid = getattr(kwargs, "from_uid", None) if kwargs is not None else None
+            channel = ""
+            ct = getattr(wrapper.context, "channel_type", None)
+            if ct is not None:
+                channel = getattr(ct, "value", str(ct))
+            content_str = str(wrapper.context.content) if wrapper.context.content is not None else ""
+            dedup_key = f"u:{channel}:{from_uid}:{content_str}"
+
+        key_hash = hashlib.md5(dedup_key.encode("utf-8")).hexdigest()
+        if key_hash in self._deduplication_cache:
             return True
 
         # 添加到缓存，并定期清理 + 限制大小避免内存泄漏
-        self._deduplication_cache.add(content_hash)
+        self._deduplication_cache.add(key_hash)
         self._cleanup_deduplication_cache()
         return False
 

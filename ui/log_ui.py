@@ -153,6 +153,16 @@ class LogModel(QAbstractTableModel):
         self._logs = deque(maxlen=10000)  # 使用循环缓冲区，最多保存10000条日志
         self._filtered_logs = []
         self._headers = ["时间", "级别", "模块", "文件", "消息"]
+        # 防抖：日志爆发时合并 layoutChanged，避免逐条触发全表重绘导致 UI 卡顿
+        self._dirty_timer = QTimer()
+        self._dirty_timer.setSingleShot(True)
+        self._dirty_timer.setInterval(80)
+        self._dirty_timer.timeout.connect(self.layoutChanged.emit)
+
+    def _schedule_changed(self):
+        """合并短时间内的多次变更，只触发一次 layoutChanged。"""
+        if not self._dirty_timer.isActive():
+            self._dirty_timer.start()
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._filtered_logs)
@@ -225,8 +235,8 @@ class LogModel(QAbstractTableModel):
         if len(self._filtered_logs) > 1000:
             self._filtered_logs = self._filtered_logs[-1000:]
 
-        # 发出数据变更信号
-        self.layoutChanged.emit()
+        # 发出数据变更信号（防抖，合并爆发）
+        self._schedule_changed()
 
     def set_filter(self, filter_func=None):
         """设置过滤器"""
@@ -353,8 +363,8 @@ class LogDisplayWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._setup_ui()
-        # 保存所有日志记录
-        self.all_logs = []
+        # 保存所有日志记录（循环缓冲，上限 10000，避免长期运行内存增长）
+        self.all_logs = deque(maxlen=10000)
         self.auto_scroll = True  # 默认自动滚动
 
     def _setup_ui(self):
@@ -676,7 +686,6 @@ class LogUI(QFrame):
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            self.log_records.clear()
             self.log_display.clear_all()
             InfoBar.success(
                 title="清空成功",

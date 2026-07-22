@@ -7,7 +7,7 @@ from typing import Optional, Union
 from pydantic import BaseModel, Field
 
 from Agent.CustomerAgent.custom.tool_decorator import agent_tool
-from Channel.pinduoduo.utils.API.send_message import SendMessage
+from bridge.sender import get_sender
 from utils.logger_loguru import get_logger
 
 logger = get_logger("SendGoodsLinkTool")
@@ -46,8 +46,8 @@ def send_goods_link(params: SendGoodsLinkParams) -> str:
             logger.warning(f"商品ID可能错误: goods_id={params.goods_id} 太小，大概率是列表序号不是真实商品ID，请重新从商品列表中选择正确的商品ID")
             return f"发送失败：goods_id={params.goods_id} 无效。你错误地使用了列表序号作为商品ID，请回到商品列表中，使用'商品ID'标签后面给出的那个大数字作为goods_id，重新调用工具。"
 
-        sender = SendMessage(str(params.shop_id), str(params.user_id))
-        result = sender.send_mallGoodsCard(params.recipient_uid, params.goods_id, biz_type=2)
+        sender = get_sender()
+        result = sender.send_product_card(str(params.shop_id), str(params.user_id), params.recipient_uid, params.goods_id, biz_type=2)
 
         if result and result.get("success"):
             logger.info(f"商品卡片发送成功: goods_id={params.goods_id}, recipient_uid={params.recipient_uid}, shop_id={params.shop_id}")

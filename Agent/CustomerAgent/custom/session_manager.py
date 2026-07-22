@@ -24,6 +24,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
 
 from utils.logger_loguru import get_logger
+from utils.db_pragma import setup_sqlite_pragmas
 
 logger = get_logger("SessionManager")
 
@@ -154,6 +155,7 @@ class SessionManager:
 
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         self.engine = create_engine(f"sqlite:///{db_path}")
+        setup_sqlite_pragmas(self.engine)
         self._Session = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine)
 
@@ -241,7 +243,7 @@ class SessionManager:
         token_count = self.estimate_tokens(messages)
         return token_count > self.threshold
 
-    def compress_history(
+    async def compress_history(
         self,
         session_id: str,
         llm_callable,  # 可调用的 LLM 函数，接收消息列表返回摘要字符串
@@ -281,7 +283,7 @@ class SessionManager:
             ]
 
             try:
-                summary = llm_callable(summary_input)
+                summary = await llm_callable(summary_input)
             except Exception as e:
                 logger.error(f"生成摘要失败: {e}")
                 # 摘要生成失败时，保留最近的消息，删除更旧的

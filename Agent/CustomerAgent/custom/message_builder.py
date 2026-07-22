@@ -115,28 +115,24 @@ class MessageBuilder:
             "recipient_uid": from_uid,  # 工具参数通常叫 recipient_uid，兼容两种命名
         }
 
-    def _inject_product_list(self, dependencies: Dict[str, Any]) -> None:
-        """
-        动态获取商品列表并注入到 dependencies
+    def fetch_product_list_text(self, shop_id: Any, user_id: Any) -> str:
+        """同步获取商品列表文本。
 
-        Args:
-            dependencies: 依赖字典（会被修改）
+        含拼多多 HTTP 调用，应由调用方放在工作线程中执行
+        （如 asyncio.to_thread），避免阻塞事件循环。
         """
-        if not dependencies.get("shop_id") or not dependencies.get("user_id"):
-            return
+        if not shop_id or not user_id:
+            return ""
 
         try:
-            params = GetShopProductsParams(
-                shop_id=dependencies["shop_id"],
-                user_id=dependencies["user_id"]
-            )
+            params = GetShopProductsParams(shop_id=shop_id, user_id=user_id)
             product_list_text = get_shop_products(params)
             # 添加说明：仅展示第一页商品
             product_list_text += "\n注：以上仅展示第一页商品，如果用户需要查看更多商品，请调用 get_shop_products 工具获取更多。"
-            dependencies["product_list"] = product_list_text
+            return product_list_text
         except Exception as e:
             logger.warning(f"动态获取商品列表失败: {e}")
-            dependencies["product_list"] = "获取商品列表失败"
+            return "获取商品列表失败"
 
     def build_messages(
         self,
@@ -161,9 +157,8 @@ class MessageBuilder:
         if self.system_prompt:
             content = self.system_prompt
             if dependencies:
-                # 动态获取商品列表并注入到 dependencies
-                self._inject_product_list(dependencies)
-
+                # product_list 由调用方（async_reply）在工作线程中预取后注入，
+                # 避免在此同步阻塞事件循环拉取拼多多商品列表。
                 for key, value in dependencies.items():
                     content = content.replace(f"{{{key}}}", str(value))
 

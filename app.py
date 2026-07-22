@@ -9,7 +9,6 @@
 5. queue_manager    → 通过 DI 容器获取
 6. message_consumer_manager → 通过 DI 容器获取
 7. status_manager   → 通过 DI 容器获取（ConnectionStatusManager 单例）
-8. cache_manager    → 通过 DI 容器获取
 
 关键原则：
 - config 必须最先初始化

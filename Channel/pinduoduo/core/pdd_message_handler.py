@@ -31,11 +31,8 @@ class MessageHandlerMixin:
 
             consumer = message_consumer_manager.create_consumer(queue_name, max_concurrent=10)
 
-            try:
-                from core.di_container import container
-                bot = container.get(CustomerAgent)
-            except Exception:
-                bot = CustomerAgent()
+            from core.di_container import container
+            bot = container.get(CustomerAgent)
             handlers = handler_chain(use_ai=True, businessHours=self.businessHours, bot=bot)
             for handler in handlers:
                 consumer.add_handler(handler)

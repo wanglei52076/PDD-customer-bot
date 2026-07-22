@@ -339,7 +339,7 @@ def configure_standard_services(config_instance: Any = None) -> 'DIContainer':
     1. ConnectionStatusManager — 连接状态管理（跨 PDDChannel 实例共享）
     2. DatabaseManager — 数据库管理器
 
-    其他服务（QueueManager、MessageConsumerManager、CacheManager）
+    其他服务（QueueManager、MessageConsumerManager）
     已通过模块级单例直接使用，无需重复注册。
 
     必须在其他模块导入前调用（通常在 app.py 中），
@@ -374,9 +374,17 @@ def configure_standard_services(config_instance: Any = None) -> 'DIContainer':
             factory=lambda: KnowledgeService()
         )
 
-    # 注：QueueManager、MessageConsumerManager、CacheManager
-    # 已在各自模块中定义了模块级单例实例（如 Message/core/queue.py 中的 queue_manager），
-    # 代码中通过 `from Message import queue_manager` 直接使用，无需重复注册到 DI 容器，
+    # 4. CustomerAgent（AI 客服代理，全局单例；initialize_async 仍懒加载）
+    from Agent.CustomerAgent.custom.customer_agent import CustomerAgent
+    if not container.is_registered(CustomerAgent):
+        container.register_singleton(
+            CustomerAgent,
+            factory=lambda: CustomerAgent()
+        )
+
+    # 注：QueueManager、MessageConsumerManager 已在各自模块中定义了模块级单例实例
+    # （如 Message/core/queue.py 中的 queue_manager），代码中通过
+    # `from Message import queue_manager` 直接使用，无需重复注册到 DI 容器，
     # 保持 DI 容器仅管理需要跨模块共享的服务（如 ConnectionStatusManager）。
 
     container.logger.info(

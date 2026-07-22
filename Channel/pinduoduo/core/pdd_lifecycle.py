@@ -125,8 +125,12 @@ class LifecycleMixin:
         try:
             self._stop_event = asyncio.Event()
 
-            token = GetToken(shop_id, user_id)
-            access_token = token.get_token()
+            # GetToken 同步 HTTP（可能触发重登，耗时较长），放工作线程避免阻塞事件循环
+            def _get_access_token():
+                token = GetToken(shop_id, user_id)
+                return token.get_token()
+
+            access_token = await asyncio.to_thread(_get_access_token)
 
             queue_name = f"pdd_{shop_id}"
             await self._setup_message_consumer(queue_name)

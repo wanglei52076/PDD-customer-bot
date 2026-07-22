@@ -5,7 +5,7 @@ from PyQt6.QtGui import QFont
 from qfluentwidgets import (SubtitleLabel, CaptionLabel, PushButton, PrimaryPushButton,
                             ScrollArea, FluentIcon as FIF)
 from utils.logger_loguru import get_logger
-from database.db_manager import db_manager
+from service.account_service import account_service
 from .card import AutoReplyCard
 from .manager import auto_reply_manager
 from .threads import SetStatusThread
@@ -160,7 +160,7 @@ class AutoReplyUI(QFrame):
             self.accounts_data.clear()
 
             # 使用批量查询一次性获取所有账号数据，减少N+1查询
-            all_accounts = db_manager.get_all_accounts_with_details()
+            all_accounts = account_service.get_all_accounts_with_details()
             self.accounts_data.extend(all_accounts)
 
             self.refreshAccountList()

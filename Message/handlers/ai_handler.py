@@ -3,6 +3,7 @@ AI回复处理器
 专注的AI处理，移除复杂预处理和发送逻辑
 """
 
+import asyncio
 from typing import Dict, Any, Optional
 from bridge.context import Context, ContextType
 from .base import BaseHandler
@@ -15,15 +16,11 @@ class AIReplyHandler(BaseHandler):
 
     def __init__(self, bot: Bot = None, auto_reply_types: set = None):
         super().__init__("AIReplyHandler")
-        # 从 DI 容器获取 CustomerAgent（如果未传入）
+        # 从 DI 容器获取 CustomerAgent 单例（如果未传入）
         if bot is None:
-            try:
-                from core.di_container import container
-                from Agent.CustomerAgent.custom.customer_agent import CustomerAgent
-                bot = container.get(CustomerAgent)
-            except Exception as e:
-                from utils.logger_loguru import get_logger
-                get_logger("AIReplyHandler").warning(f"从DI容器获取CustomerAgent失败: {e}, 将使用无Bot模式")
+            from core.di_container import container
+            from Agent.CustomerAgent.custom.customer_agent import CustomerAgent
+            bot = container.get(CustomerAgent)
         self.bot = bot
         self.preprocessor = MessagePreprocessor()
         self.auto_reply_types = auto_reply_types or {
@@ -100,10 +97,13 @@ class AIReplyHandler(BaseHandler):
                 self.logger.warning(f"缺少发送信息: shop_id={shop_id}, user_id={user_id}, from_uid={from_uid}")
                 return False
 
-            # 尝试发送消息
-            from Channel.pinduoduo.utils.API.send_message import SendMessage
-            sender = SendMessage(shop_id, user_id)
-            result = sender.send_text(from_uid, reply)
+            # 通过发送器抽象发送（同步 HTTP + DB，放工作线程避免阻塞事件循环）
+            from bridge.sender import get_sender
+            sender = get_sender(context.channel_type)
+            if not sender:
+                self.logger.warning(f"无可用发送器: channel_type={context.channel_type}")
+                return False
+            result = await asyncio.to_thread(sender.send_text, shop_id, user_id, from_uid, reply)
             if isinstance(result, dict) and result.get("success"):
                 return True
             return False

@@ -9,8 +9,7 @@ from PyQt6.QtGui import QFont, QPixmap, QPainter, QPainterPath
 from qfluentwidgets import (CardWidget, SubtitleLabel, CaptionLabel, BodyLabel,
                            PrimaryPushButton, PushButton, StrongBodyLabel,
                            InfoBadge, ScrollArea, FluentIcon as FIF)
-from database.db_manager import db_manager
-from Channel.pinduoduo.pdd_login import login_pdd
+from service.account_service import account_service
 from utils.logger_loguru import get_logger
 import requests
 
@@ -75,7 +74,7 @@ class LoginThread(QThread):
             
             # 执行登录
             result = loop.run_until_complete(
-                login_pdd(
+                account_service.login(
                     name=self.account_data["username"],
                     password=self.account_data["password"]
                 )
@@ -459,19 +458,19 @@ class UserManagerWidget(QFrame):
             self.accounts_data = []
             
             # 获取所有渠道
-            channels = db_manager.get_all_channels()
+            channels = account_service.get_all_channels()
             
             for channel in channels:
                 channel_name = channel["channel_name"]
                 
                 # 获取该渠道下的所有店铺
-                shops = db_manager.get_shops_by_channel(channel_name)
+                shops = account_service.get_shops_by_channel(channel_name)
                 
                 for shop in shops:
                     shop_id = shop["shop_id"]
                     
                     # 获取该店铺下的所有账号
-                    accounts = db_manager.get_accounts_by_shop(channel_name, shop_id)
+                    accounts = account_service.get_accounts_by_shop(channel_name, shop_id)
                     
                     for account in accounts:
                         account_data = {
@@ -563,7 +562,7 @@ class UserManagerWidget(QFrame):
         try:
             if result:  # 登录成功，result是一个包含信息的字典
                 # 首先更新cookies（重要！）
-                cookies_updated = db_manager.update_account_cookies(
+                cookies_updated = account_service.update_account_cookies(
                     channel_name=account_data["channel_name"],
                     shop_id=account_data["shop_id"],
                     user_id=account_data["user_id"],
@@ -571,7 +570,7 @@ class UserManagerWidget(QFrame):
                 )
                 
                 # 然后更新账号状态为在线
-                status_updated = db_manager.update_account_status(
+                status_updated = account_service.update_account_status(
                     account_data["channel_name"],
                     account_data["shop_id"],
                     account_data["user_id"],
@@ -585,7 +584,7 @@ class UserManagerWidget(QFrame):
                
             else:  # 登录失败，result为False
                 # 登录失败，更新数据库状态为离线
-                db_manager.update_account_status(
+                account_service.update_account_status(
                     account_data["channel_name"],
                     account_data["shop_id"],
                     account_data["user_id"],
@@ -635,15 +634,15 @@ class UserManagerWidget(QFrame):
             user_id = result["user_id"]
             username = result["username"]
             # 1. 检查账号是否已存在
-            existing_account = db_manager.get_account(channel_name, shop_id, user_id)
+            existing_account = account_service.get_account(channel_name, shop_id, user_id)
             if existing_account:
                 QMessageBox.information(self, "提示", f"账号 '{username}' 已存在于店铺 '{shop_name}' 中，无需重复添加。")
                 return
 
             # 2. 检查店铺是否存在，不存在则添加
-            existing_shop = db_manager.get_shop(channel_name, shop_id)
+            existing_shop = account_service.get_shop(channel_name, shop_id)
             if not existing_shop:
-                db_manager.add_shop(
+                account_service.add_shop(
                     channel_name=channel_name,
                     shop_id=shop_id,
                     shop_name=shop_name,
@@ -654,7 +653,7 @@ class UserManagerWidget(QFrame):
 
             # 3. 添加新账号
             # 注意：这里的add_account可能需要更多参数，我们传递所有已知信息
-            success = db_manager.add_account(
+            success = account_service.add_account(
                 channel_name=channel_name,
                 shop_id=shop_id,
                 username=username,
@@ -693,7 +692,7 @@ class UserManagerWidget(QFrame):
 
                 # 如果用户名或密码发生变化，则统一更新
                 if username_changed or password_changed:
-                    update_info_success = db_manager.update_account_info(
+                    update_info_success = account_service.update_account_info(
                         channel_name=new_data["channel_name"],
                         shop_id=new_data["shop_id"],
                         user_id=new_data["user_id"],
@@ -704,7 +703,7 @@ class UserManagerWidget(QFrame):
                 
                 # 如果状态变化，仅更新状态
                 if status_changed:
-                    update_status_success = db_manager.update_account_status(
+                    update_status_success = account_service.update_account_status(
                         channel_name=new_data["channel_name"],
                         shop_id=new_data["shop_id"],
                         user_id=new_data["user_id"],
@@ -742,7 +741,7 @@ class UserManagerWidget(QFrame):
         
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                success = db_manager.delete_account(
+                success = account_service.delete_account(
                     account_data["channel_name"],
                     account_data["shop_id"],
                     account_data["user_id"]

@@ -169,11 +169,24 @@ class CustomerAgent(Bot):
                 session_id = f"fallback_{abs(hash(query)) % 100000}"
                 dependencies = {}
 
-            # 加载历史并检查压缩
-            history = self._session_manager.get_history(session_id)
-            if self._session_manager.should_compress(session_id):
+            # 加载历史并检查压缩（DB 操作放工作线程，避免阻塞事件循环）
+            history = await asyncio.to_thread(self._session_manager.get_history, session_id)
+            if await asyncio.to_thread(self._session_manager.should_compress, session_id):
                 logger.info(f"触发上下文压缩: session_id={session_id}")
-                await self._compress_with_llm(session_id, history)
+                await self._compress_with_llm(session_id)
+                # 压缩后重新加载，使本轮回复使用压缩后的历史
+                history = await asyncio.to_thread(self._session_manager.get_history, session_id)
+
+            # 预取商品列表（拼多多 HTTP，放工作线程）并注入 dependencies，
+            # 避免 build_messages 内同步阻塞
+            shop_id = dependencies.get("shop_id")
+            user_id = dependencies.get("user_id")
+            if shop_id and user_id:
+                dependencies["product_list"] = await asyncio.to_thread(
+                    self._message_builder.fetch_product_list_text, shop_id, user_id
+                )
+            else:
+                dependencies["product_list"] = ""
 
             # 构建 messages
             messages = self._message_builder.build_messages(query, history, dependencies)
@@ -181,8 +194,9 @@ class CustomerAgent(Bot):
             # 执行 Agent 循环
             final_content = await self._run_agent_loop(messages, dependencies)
 
-            # 保存最终回复到历史
-            self._session_manager.add_message(
+            # 保存最终回复到历史（DB 写入放工作线程，避免阻塞事件循环）
+            await asyncio.to_thread(
+                self._session_manager.add_message,
                 session_id=session_id,
                 role="assistant",
                 content=final_content,
@@ -275,12 +289,16 @@ class CustomerAgent(Bot):
     async def _compress_with_llm(
         self,
         session_id: str,
-        history: List[Dict[str, Any]],
     ) -> None:
-        """使用 LLM 生成摘要并压缩历史"""
+        """使用 LLM 生成摘要并压缩历史。
 
-        def summary_llm(messages: List[Dict[str, Any]]) -> str:
-            """同步调用 LLM 生成摘要"""
+        本方法运行在事件循环中（由 async_reply 调用），直接 await LLM 即可；
+        切勿使用 asyncio.run——在已有事件循环里会抛 RuntimeError，导致
+        压缩从未真正执行（历史只增不减）。
+        """
+
+        async def summary_llm(messages: List[Dict[str, Any]]) -> str:
+            """异步调用 LLM 生成摘要"""
             summary_prompt = (
                 "请简洁地总结以下对话的要点，保留关键信息和用户意图。\n\n"
                 f"对话内容（共 {len(messages)} 条消息）：\n"
@@ -291,22 +309,17 @@ class CustomerAgent(Bot):
                 )
             )
 
-            # 在线程中使用 asyncio.run 创建新的事件循环执行协程
             try:
-                response = asyncio.run(
-                    self._llm_client.chat(
-                        messages=[
-                            {"role": "system", "content": "你是一个对话摘要助手。请简洁地总结对话要点。"},
-                            {"role": "user", "content": summary_prompt},
-                        ],
-                        tool_choice="none",
-                    )
+                response = await self._llm_client.chat(
+                    messages=[
+                        {"role": "system", "content": "你是一个对话摘要助手。请简洁地总结对话要点。"},
+                        {"role": "user", "content": summary_prompt},
+                    ],
+                    tool_choice="none",
                 )
                 return response.content or "[摘要生成失败]"
-            except RuntimeError:
-                # 如果当前已有事件循环（某些环境中），降级为同步返回
-                return "[对话历史摘要]"
-            except Exception:
+            except Exception as e:
+                logger.error(f"生成摘要失败: {e}")
                 return "[摘要生成失败]"
 
-        self._session_manager.compress_history(session_id, summary_llm)
+        await self._session_manager.compress_history(session_id, summary_llm)

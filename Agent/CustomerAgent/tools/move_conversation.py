@@ -7,7 +7,7 @@ from typing import Optional, Union
 from pydantic import BaseModel, Field
 
 from Agent.CustomerAgent.custom.tool_decorator import agent_tool
-from Channel.pinduoduo.utils.API.send_message import SendMessage
+from bridge.sender import get_sender
 from utils.logger_loguru import get_logger
 
 logger = get_logger("TransferConversationTool")
@@ -33,8 +33,8 @@ def transfer_conversation(params: TransferConversationParams) -> str:
         if not all([params.shop_id, params.user_id, params.recipient_uid]):
             return f"转接失败：缺少必要的会话信息 (shop_id={params.shop_id}, user_id={params.user_id}, recipient_uid={params.recipient_uid})"
 
-        sender = SendMessage(str(params.shop_id), str(params.user_id))
-        cs_list = sender.getAssignCsList()
+        sender = get_sender()
+        cs_list = sender.get_cs_list(str(params.shop_id), str(params.user_id))
         my_cs_uid = f"cs_{params.shop_id}_{params.user_id}"
         if cs_list and isinstance(cs_list, dict):
             # 过滤掉自己，不转接给自己
@@ -44,7 +44,7 @@ def transfer_conversation(params: TransferConversationParams) -> str:
                 # 选择第一个可用的客服
                 cs_uid = available_cs_uids[0]
                 # 转移会话
-                transfer_result = sender.move_conversation(params.recipient_uid, cs_uid)
+                transfer_result = sender.transfer_to_cs(str(params.shop_id), str(params.user_id), params.recipient_uid, cs_uid)
 
                 if transfer_result and transfer_result.get('success'):
                     logger.info(f"会话转接成功: recipient_uid={params.recipient_uid}, to_cs_uid={cs_uid}")
