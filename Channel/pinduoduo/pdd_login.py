@@ -56,37 +56,92 @@ class PDDLogin():
         self.password = password
 
     # 本地浏览器启动参数（Chrome/Edge 通用）
+    # 精简为对登录真正有用且兼容性好的参数；避免 --disable-web-security（登录用不到，
+    # 且会触发部分 Edge 版本安全检查导致启动后秒退）和 --disable-features=
+    # VizDisplayCompositor（新版浏览器无此特性，可能报错）。
     _LAUNCH_ARGS = [
-        '--disable-gpu',
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
         '--disable-blink-features=AutomationControlled',
         '--disable-notifications',
-        '--disable-web-security',
-        '--disable-features=VizDisplayCompositor',
+        '--disable-dev-shm-usage',
     ]
+
+    # 本地浏览器可执行文件的常见安装位置，用于显式定位（channel 方式在部分安装
+    # 下会找不到）。按优先级：Chrome > Edge。
+    _BROWSER_PATHS = [
+        # Google Chrome
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        # 用户级安装
+        r"{localappdata}\Google\Chrome\Application\chrome.exe",
+        # Microsoft Edge（Windows 自带）
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    ]
+
+    @staticmethod
+    def _resolve_browser_path():
+        """探测本地浏览器 exe 路径。返回 (path, channel_name) 或 (None, None)。"""
+        localappdata = os.getenv("LOCALAPPDATA", "")
+        for raw in PDDLogin._BROWSER_PATHS:
+            p = raw.replace("{localappdata}", localappdata)
+            if os.path.isfile(p):
+                # 从路径判断 channel：含 Edge 用 msedge，否则 chrome
+                channel = "msedge" if "Edge" in p else "chrome"
+                return p, channel
+        return None, None
 
     async def _launch_context(self, playwright, user_data_dir: str, headless: bool):
         """启动用户本地的浏览器，避免下载 Playwright 自带的 Chromium。
 
         优先 Google Chrome，其次 Microsoft Edge（Windows 自带）；
-        都不可用时抛出明确错误，提示用户安装。
+        都不可用时回退到 Playwright 自带 Chromium（需曾运行 playwright install）；
+        全部失败抛出明确错误，提示用户安装。
         """
-        last_error = None
-        for channel in ("chrome", "msedge"):
+        exe_path, channel = self._resolve_browser_path()
+        attempts = []
+
+        # 1) 用探测到的真实路径启动本地浏览器（比 channel 更可靠）
+        if exe_path:
             try:
                 return await playwright.chromium.launch_persistent_context(
                     user_data_dir,
-                    channel=channel,
+                    executable_path=exe_path,
                     headless=headless,
                     args=self._LAUNCH_ARGS,
                 )
             except Exception as e:
-                last_error = e
+                attempts.append(f"{channel}({exe_path}): {str(e).splitlines()[0][:100]}")
                 self.logger.warning(f"启动本地浏览器 {channel} 失败: {e}")
+
+        # 2) 回退：channel 方式（路径探测未命中时的兜底）
+        for ch in ("chrome", "msedge"):
+            try:
+                return await playwright.chromium.launch_persistent_context(
+                    user_data_dir,
+                    channel=ch,
+                    headless=headless,
+                    args=self._LAUNCH_ARGS,
+                )
+            except Exception as e:
+                attempts.append(f"{ch}(channel): {str(e).splitlines()[0][:100]}")
+                self.logger.warning(f"启动本地浏览器 {ch} 失败: {e}")
+
+        # 3) 最后回退：Playwright 自带 Chromium（若已安装）
+        try:
+            return await playwright.chromium.launch_persistent_context(
+                user_data_dir,
+                headless=headless,
+                args=self._LAUNCH_ARGS,
+            )
+        except Exception as e:
+            attempts.append(f"chromium(bundled): {str(e).splitlines()[0][:100]}")
+            self.logger.warning(f"启动 Playwright Chromium 失败: {e}")
+
         raise RuntimeError(
-            "未找到可用的本地浏览器（Chrome/Edge）。请安装 Google Chrome 或 Microsoft Edge 后重试。"
-        ) from last_error
+            "未找到可用的浏览器。尝试过的方案：\n  - " +
+            "\n  - ".join(attempts) +
+            "\n请安装 Google Chrome 或 Microsoft Edge 后重试。"
+        )
 
     async def login(self, headless=False):
         """使用账号密码登录
