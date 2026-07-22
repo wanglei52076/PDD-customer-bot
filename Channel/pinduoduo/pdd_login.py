@@ -40,12 +40,46 @@ import requests
 import json
 import hashlib
 import asyncio
+import socket
+import subprocess
+import urllib.request
 from typing import Optional, Dict, Any, Tuple
 import sys
 from database import db_manager
 from playwright.async_api import async_playwright
 from Channel.pinduoduo.utils.API.get_shop_info import GetShopInfo
 from Channel.pinduoduo.utils.API.get_user_info import GetUserInfo
+
+
+class _CdpContextHandle:
+    """包装 CDP 连接的 context，close() 时同时终止手动启动的浏览器进程。
+
+    connect_over_cdp 返回的 BrowserContext.close() 只断开 Playwright 连接，
+    不会关闭我们用 subprocess 拉起的浏览器进程，需在此兜底。
+    """
+
+    def __init__(self, context, proc):
+        self._context = context
+        self._proc = proc
+
+    def __getattr__(self, name):
+        # new_page / cookies / pages 等方法透传给真实 context
+        return getattr(self._context, name)
+
+    async def close(self):
+        try:
+            await self._context.close()
+        except Exception:
+            pass
+        if self._proc and self._proc.poll() is None:
+            try:
+                self._proc.terminate()
+                self._proc.wait(timeout=5)
+            except Exception:
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
 
 class PDDLogin():
     def __init__(self,name,password):
@@ -126,7 +160,16 @@ class PDDLogin():
                 attempts.append(f"{ch}(channel): {str(e).splitlines()[0][:100]}")
                 self.logger.warning(f"启动本地浏览器 {ch} 失败: {e}")
 
-        # 3) 最后回退：Playwright 自带 Chromium（若已安装）
+        # 3) 回退：手动启动浏览器用 remote-debugging-port，再 connect_over_cdp。
+        # 部分电脑 Edge 在 Playwright 的 --remote-debugging-pipe 下启动后秒退
+        # （Target page, context or browser has been closed），改用端口调试可绕过。
+        if exe_path:
+            handle = await self._launch_via_cdp(playwright, exe_path, user_data_dir, headless)
+            if handle is not None:
+                return handle
+            attempts.append(f"{channel}(cdp-over-port): 启动后未就绪")
+
+        # 4) 最后回退：Playwright 自带 Chromium（若已安装）
         try:
             return await playwright.chromium.launch_persistent_context(
                 user_data_dir,
@@ -142,6 +185,74 @@ class PDDLogin():
             "\n  - ".join(attempts) +
             "\n请安装 Google Chrome 或 Microsoft Edge 后重试。"
         )
+
+    async def _launch_via_cdp(self, playwright, exe_path, user_data_dir, headless):
+        """手动启动浏览器（remote-debugging-port），再 connect_over_cdp 连接。
+
+        绕开 Playwright 默认的 --remote-debugging-pipe，解决部分电脑 Edge
+        在 pipe 模式下启动后秒退的问题。失败返回 None。
+        """
+        # 找一个空闲端口
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+
+        args = [
+            exe_path,
+            f"--remote-debugging-port={port}",
+            f"--user-data-dir={user_data_dir}",
+            "--no-first-run", "--no-default-browser-check",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-notifications",
+        ]
+        if headless:
+            args.append("--headless=new")
+        # about:blank 作为初始页，避免打开默认主页
+        args.append("about:blank")
+
+        try:
+            proc = subprocess.Popen(
+                args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            self.logger.warning(f"手动启动浏览器失败: {e}")
+            return None
+
+        self.logger.debug(f"CDP 回退：浏览器已启动 pid={proc.pid} port={port}")
+        # 等待 CDP 端点就绪（最多约 15 秒）
+        ready = False
+        for _ in range(50):
+            if proc.poll() is not None:
+                self.logger.warning("CDP 回退：浏览器进程已退出")
+                return None
+            try:
+                urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/json/version", timeout=1
+                )
+                ready = True
+                break
+            except Exception:
+                await asyncio.sleep(0.3)
+
+        if not ready:
+            self.logger.warning("CDP 回退：等待 CDP 端点超时")
+            if proc.poll() is None:
+                proc.terminate()
+            return None
+
+        try:
+            browser = await playwright.chromium.connect_over_cdp(
+                f"http://127.0.0.1:{port}"
+            )
+            # 手动启动的浏览器带 --user-data-dir，第一个 context 即持久化 context
+            context = browser.contexts[0] if browser.contexts else await browser.new_context()
+            self.logger.info(f"CDP 回退连接成功（端口 {port}）")
+            return _CdpContextHandle(context, proc)
+        except Exception as e:
+            self.logger.warning(f"CDP 回退连接失败: {e}")
+            if proc.poll() is None:
+                proc.terminate()
+            return None
 
     async def login(self, headless=False):
         """使用账号密码登录
