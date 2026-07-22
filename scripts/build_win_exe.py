@@ -2,6 +2,14 @@ import sys, subprocess, shutil, platform, os
 from pathlib import Path
 import argparse
 
+# CI（GitHub Actions windows runner）默认控制台编码是 cp1252，打印中文会
+# UnicodeEncodeError。强制 stdout/stderr 用 UTF-8，保证任何机器上都能输出。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 def run(cmd):
     """运行命令"""
     print(f"执行: {' '.join(str(c) for c in cmd)}")
