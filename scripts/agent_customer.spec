@@ -22,17 +22,32 @@ else:
     PROJECT_ROOT = Path.cwd()
 
 # ================================
+# Playwright 驱动打包
+# ================================
+# collect_all 收集 playwright/driver/ 下的 node 与 JS，否则打包后启动浏览器会
+# 因驱动缺失而失败。配合 pdd_login 的 channel="chrome"，用户无需安装 Playwright 浏览器。
+from PyInstaller.utils.hooks import collect_all
+_pw_datas, _pw_binaries, _pw_hidden = collect_all("playwright")
+
+# node.exe 不会进入 binaries，但会出现在 datas（目标 playwright/driver），这里显式补进 binaries
+# 以便在 EXE 元信息（VirusTotal/安全软件）层面可见，行为与 datas 等价，属防御性冗余。
+_pw_node = [
+    (src, dst) for src, dst in _pw_datas if src.lower().endswith("node.exe")
+]
+_pw_binaries = list(_pw_binaries) + _pw_node
+
+# ================================
 # 基础配置
 # ================================
 a = Analysis(
     [str(PROJECT_ROOT / "app.py")],
     pathex=[str(PROJECT_ROOT)],
-    binaries=[],
+    binaries=_pw_binaries,
     datas=[
         # 图标文件
         (str(PROJECT_ROOT / "icon" / "icon.ico"), "icon"),
         # 配置文件（如果存在）
-    ],
+    ] + _pw_datas,
     hiddenimports=[
         # === PyQt6 & Fluent Widgets ===
         "PyQt6",
@@ -201,7 +216,7 @@ a = Analysis(
         # === httpx (for openai) ===
         "httpx",
         "httpcore",
-    ],
+    ] + _pw_hidden,
     hookspath=[],
     hooksconfig={},
     keys=block_cipher,
