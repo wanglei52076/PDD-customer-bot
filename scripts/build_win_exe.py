@@ -77,14 +77,42 @@ def ensure_iscc():
         raise RuntimeError("Inno Setup 安装后仍未找到 ISCC.exe，请设置环境变量 ISCC")
     return iscc
 
+def get_version():
+    """确定安装包版本号。
+
+    优先级：
+      1. 环境变量 APP_VERSION（CI 显式指定）
+      2. git describe --tags（取最近 tag，去掉前导 v）
+      3. 兜底 "0.0.0-dev"
+    """
+    env = os.environ.get("APP_VERSION", "").strip().lstrip("v")
+    if env:
+        return env
+    try:
+        out = subprocess.check_output(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            stderr=subprocess.DEVNULL,
+        )
+        ver = out.decode("utf-8", "replace").strip().lstrip("v")
+        if ver:
+            return ver
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+    return "0.0.0-dev"
+
 def build_installer():
-    """调用 Inno Setup 把 dist/AgentCustomer 编译成单个 setup.exe。"""
+    """调用 Inno Setup 把 dist/AgentCustomer 编译成单个 setup.exe。
+
+    通过 /DAppVersion= 把版本号传给 installer.iss（来自 git tag / APP_VERSION）。
+    """
     iscc = ensure_iscc()
     iss = Path("scripts") / "installer.iss"
     if not iss.exists():
         raise FileNotFoundError(f"找不到 Inno 脚本: {iss}")
-    run([iscc, str(iss)])
-    return Path("dist") / "installer"
+    version = get_version()
+    print(f"安装包版本号: {version}")
+    run([iscc, f"/DAppVersion={version}", str(iss)])
+    return Path("dist") / "installer", version
 
 def main():
     parser = argparse.ArgumentParser(description="构建 Windows 发布包")
@@ -142,11 +170,15 @@ def main():
         print(f"onedir 输出目录: {dist_dir.absolute()}")
         return
 
-    installer_dir = build_installer()
-    setups = list(installer_dir.glob("*.exe")) if installer_dir.exists() else []
-    if not setups:
-        raise RuntimeError("Inno Setup 编译完成但未找到 setup.exe")
-    setup = setups[0]
+    installer_dir, version = build_installer()
+    # 文件名带版本号，精确匹配，避免拿到旧版本的 setup.exe
+    setup = installer_dir / f"Agent-Customer-Setup-{version}.exe"
+    if not setup.exists():
+        # 兜底：取目录里最新的 setup
+        setups = sorted(installer_dir.glob("*.exe"), key=lambda p: p.stat().st_mtime)
+        if not setups:
+            raise RuntimeError("Inno Setup 编译完成但未找到 setup.exe")
+        setup = setups[-1]
     ssize = setup.stat().st_size / (1024 * 1024)
     print(f"\n{'=' * 50}")
     print(f"发布包构建完成: {setup}")

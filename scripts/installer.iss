@@ -11,12 +11,18 @@
 ;     因此不能装到 Program Files。
 ;
 ; 编译命令（ISCC.exe 路径按实际安装位置调整）：
-;   ISCC.exe scripts\installer.iss
-; 产物：dist\installer\Agent-Customer-Setup-0.1.0.exe
+;   ISCC.exe scripts\installer.iss                 （用默认版本号）
+;   ISCC.exe /DAppVersion=1.3 scripts\installer.iss （指定版本号）
+; 实际构建由 scripts\build_win_exe.py 调用，自动从 git tag 读取版本号。
+; 产物：dist\installer\Agent-Customer-Setup-<version>.exe
 ; ============================================================
 
 #define AppName      "Agent-Customer"
-#define AppVersion   "0.1.0"
+; 版本号可被 ISCC /DAppVersion=x.y.z 覆盖（build_win_exe.py 会从 git tag 传入）；
+; 未传入时用默认占位版本。
+#ifndef AppVersion
+  #define AppVersion "0.0.0-dev"
+#endif
 #define AppPublisher "Agent-Customer"
 #define AppExe       "AgentCustomer.exe"
 ; 源目录：PyInstaller 的 onedir 产物
