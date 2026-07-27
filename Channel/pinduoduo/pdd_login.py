@@ -42,6 +42,7 @@ import hashlib
 import asyncio
 import socket
 import subprocess
+import threading
 import urllib.request
 from typing import Optional, Dict, Any, Tuple
 import sys
@@ -131,6 +132,27 @@ class PDDLogin():
                 return p, channel
         return None, None
 
+    def _clean_profile_locks(self, user_data_dir: str) -> None:
+        """启动前清理 user_data_dir 中 Chromium 的单例锁文件。
+
+        Edge/Chrome 异常退出后会残留 SingletonLock / SingletonCookie /
+        SingletonSocket，下次启动时浏览器检测到 "profile 被占用" 会立即秒退。
+        此处尽力清理；若文件被存活实例占用（删不掉）则静默跳过，不影响启动。
+        """
+        if not user_data_dir:
+            return
+        profile_dir = Path(user_data_dir)
+        removed = []
+        for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            try:
+                (profile_dir / name).unlink(missing_ok=True)
+                removed.append(name)
+            except Exception:
+                # 文件不存在（missing_ok 已处理）或被占用，跳过
+                pass
+        if removed:
+            self.logger.debug(f"已清理 profile 锁文件 {removed}: {user_data_dir}")
+
     async def _launch_context(self, playwright, user_data_dir: str, headless: bool):
         """启动用户本地的浏览器，避免下载 Playwright 自带的 Chromium。
 
@@ -140,6 +162,10 @@ class PDDLogin():
         """
         exe_path, channel = self._resolve_browser_path()
         attempts = []
+
+        # 启动前清理上次崩溃可能残留的 profile 锁，避免浏览器检测到
+        # "profile 被占用" 而秒退（本仓库历史上存在 Edge 秒退问题）
+        self._clean_profile_locks(user_data_dir)
 
         # 1) 用探测到的真实路径启动本地浏览器（比 channel 更可靠）
         if exe_path:
@@ -154,8 +180,12 @@ class PDDLogin():
                 attempts.append(f"{channel}({exe_path}): {str(e).splitlines()[0][:100]}")
                 self.logger.warning(f"启动本地浏览器 {channel} 失败: {e}")
 
-        # 2) 回退：channel 方式（路径探测未命中时的兜底）
+        # 2) 回退：channel 方式（路径探测未命中时的兜底）。
+        # 级 1 已用 executable_path 试过同一浏览器（pipe 模式同样秒退），跳过。
+        tried_channel = channel if exe_path else None
         for ch in ("chrome", "msedge"):
+            if ch == tried_channel:
+                continue
             try:
                 return await playwright.chromium.launch_persistent_context(
                     user_data_dir,
@@ -217,20 +247,31 @@ class PDDLogin():
         # about:blank 作为初始页，避免打开默认主页
         args.append("about:blank")
 
+        # 用 PIPE 捕获 stderr，后台线程持续排空避免管道写满阻塞浏览器；
+        # 进程退出后读取内容，用于诊断"秒退"的真正原因。
+        stderr_chunks: list = []
         try:
             proc = subprocess.Popen(
-                args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
         except Exception as e:
             self.logger.warning(f"手动启动浏览器失败: {e}")
             return None
+
+        drain_thread = threading.Thread(
+            target=self._drain_proc_stderr, args=(proc, stderr_chunks), daemon=True
+        )
+        drain_thread.start()
 
         self.logger.debug(f"CDP 回退：浏览器已启动 pid={proc.pid} port={port}")
         # 等待 CDP 端点就绪（最多约 15 秒）
         ready = False
         for _ in range(50):
             if proc.poll() is not None:
-                self.logger.warning("CDP 回退：浏览器进程已退出")
+                self._log_proc_stderr(
+                    stderr_chunks, drain_thread,
+                    f"CDP 回退：浏览器进程已退出 pid={proc.pid} port={port}",
+                )
                 return None
             try:
                 urllib.request.urlopen(
@@ -242,9 +283,12 @@ class PDDLogin():
                 await asyncio.sleep(0.3)
 
         if not ready:
-            self.logger.warning("CDP 回退：等待 CDP 端点超时")
             if proc.poll() is None:
                 proc.terminate()
+            self._log_proc_stderr(
+                stderr_chunks, drain_thread,
+                f"CDP 回退：等待 CDP 端点超时 port={port}",
+            )
             return None
 
         try:
@@ -256,10 +300,45 @@ class PDDLogin():
             self.logger.info(f"CDP 回退连接成功（端口 {port}）")
             return _CdpContextHandle(context, proc)
         except Exception as e:
-            self.logger.warning(f"CDP 回退连接失败: {e}")
             if proc.poll() is None:
                 proc.terminate()
+            self._log_proc_stderr(
+                stderr_chunks, drain_thread,
+                f"CDP 回退连接失败: {e}",
+            )
             return None
+
+    @staticmethod
+    def _drain_proc_stderr(proc, out_chunks: list) -> None:
+        """后台持续读取子进程 stderr，防止管道缓冲区写满阻塞浏览器进程。"""
+        try:
+            stream = proc.stderr
+            if stream is None:
+                return
+            # read1 只要有一丁点数据就返回，适合持续排空；EOF 时返回 b''
+            while True:
+                chunk = stream.read1(4096)
+                if not chunk:
+                    break
+                out_chunks.append(chunk)
+        except Exception:
+            pass
+
+    def _log_proc_stderr(self, stderr_chunks: list, drain_thread, headline: str) -> None:
+        """浏览器启动失败后读取并打印捕获的 stderr，定位秒退原因。"""
+        # 进程已退出，等排空线程读完残余数据（read1 随即返回 b''）
+        try:
+            drain_thread.join(timeout=2.0)
+        except Exception:
+            pass
+        raw = b"".join(stderr_chunks)
+        if not raw:
+            self.logger.warning(f"{headline}\n浏览器 stderr 为空（未输出任何错误信息）")
+            return
+        text = raw.decode("utf-8", errors="replace").strip()
+        if len(text) > 2000:
+            text = text[:2000] + "...(截断)"
+        self.logger.warning(f"{headline}\n浏览器 stderr:\n{text}")
 
     async def login(self, headless=False):
         """使用账号密码登录
