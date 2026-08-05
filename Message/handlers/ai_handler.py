@@ -61,7 +61,9 @@ class AIReplyHandler(BaseHandler):
             return True
 
         except Exception as e:
-            self.logger.error(f"AI回复处理失败: {e}")
+            self.logger.error(
+                f"AI回复处理失败: error_type={type(e).__name__}"
+            )
             return await self._handle_fallback(context, metadata)
 
     async def _get_ai_reply(self, query: str, context: Context) -> Optional[str]:
@@ -82,7 +84,9 @@ class AIReplyHandler(BaseHandler):
                 return None
 
         except Exception as e:
-            self.logger.error(f"AI Bot调用失败: {e}")
+            self.logger.error(
+                f"AI Bot调用失败: error_type={type(e).__name__}"
+            )
             return None
 
     async def _send_reply(self, context: Context, reply: str, metadata: Dict[str, Any]) -> bool:
@@ -109,7 +113,9 @@ class AIReplyHandler(BaseHandler):
             return False
 
         except Exception as e:
-            self.logger.error(f"发送回复失败: {e}")
+            self.logger.error(
+                f"发送回复失败: error_type={type(e).__name__}"
+            )
             return False
 
     async def _handle_fallback(self, context: Context, metadata: Dict[str, Any]) -> bool:
@@ -132,5 +138,7 @@ class AIReplyHandler(BaseHandler):
             return True
 
         except Exception as e:
-            self.logger.error(f"备用回复处理失败: {e}")
-            return True  # 即使失败也返回True，避免重复处理
+            self.logger.error(
+                f"备用回复处理失败: error_type={type(e).__name__}"
+            )
+            return False

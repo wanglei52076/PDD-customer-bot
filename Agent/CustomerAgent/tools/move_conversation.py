@@ -24,6 +24,7 @@ class TransferConversationParams(BaseModel):
     name="transfer_conversation",
     description="将当前会话转接给人工客服。",
     param_model=TransferConversationParams,
+    side_effect=True,
 )
 def transfer_conversation(params: TransferConversationParams) -> str:
     """
@@ -31,7 +32,7 @@ def transfer_conversation(params: TransferConversationParams) -> str:
     """
     try:
         if not all([params.shop_id, params.user_id, params.recipient_uid]):
-            return f"转接失败：缺少必要的会话信息 (shop_id={params.shop_id}, user_id={params.user_id}, recipient_uid={params.recipient_uid})"
+            return "转接失败：缺少必要的会话信息"
 
         sender = get_sender()
         cs_list = sender.get_cs_list(str(params.shop_id), str(params.user_id))
@@ -47,17 +48,17 @@ def transfer_conversation(params: TransferConversationParams) -> str:
                 transfer_result = sender.transfer_to_cs(str(params.shop_id), str(params.user_id), params.recipient_uid, cs_uid)
 
                 if transfer_result and transfer_result.get('success'):
-                    logger.info(f"会话转接成功: recipient_uid={params.recipient_uid}, to_cs_uid={cs_uid}")
+                    logger.info("会话转接成功")
                     return "会话转接成功"
                 else:
                     logger.warning(f"会话转接失败: transfer_result={transfer_result}")
                     return "会话转接失败"
             else:
-                logger.warning(f"会话转接失败: 当前无可用的人工客服 (shop_id={params.shop_id})")
+                logger.warning("会话转接失败: 当前无可用的人工客服")
                 return "当前无可用的人工客服"
         logger.warning("会话转接失败：无法获取客服列表")
         return "会话转接失败：无法获取客服列表"
 
     except Exception as e:
-        logger.error(f"转接过程中发生错误: {str(e)}")
-        return f"转接过程中发生错误: {str(e)}"
+        logger.error(f"转接过程中发生错误: {type(e).__name__}")
+        return "转接失败，请稍后重试"

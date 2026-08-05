@@ -2,6 +2,7 @@
 关键词检测处理器 - 检测转人工关键词并触发转人工流程
 """
 import asyncio
+from datetime import datetime, time
 from typing import Dict, Any
 from bridge.context import Context, ContextType
 from .base import BaseHandler
@@ -12,9 +13,10 @@ from bridge.sender import get_sender
 class KeywordDetectionHandler(BaseHandler):
     """关键词检测处理器 - 检测转人工关键词并触发转人工流程"""
 
-    def __init__(self):
+    def __init__(self, business_hours=None):
         super().__init__("KeywordDetectionHandler")
         self.logger = get_logger("KeywordDetectionHandler")
+        self.business_hours = business_hours or {"start": "08:00", "end": "23:00"}
         self.keywords = self._load_keywords()
 
         # 记录加载的关键词数量
@@ -25,10 +27,12 @@ class KeywordDetectionHandler(BaseHandler):
         try:
             keywords_data = db_manager.get_all_keywords()
             keywords = {item['keyword'].lower() for item in keywords_data if item.get('keyword')}
-            self.logger.debug(f"从数据库加载关键词: {keywords}")
+            self.logger.debug(f"loaded keyword count={len(keywords)}")
             return keywords
         except Exception as e:
-            self.logger.error(f"加载关键词失败: {e}")
+            self.logger.error(
+                f"keyword load failed: error_type={type(e).__name__}"
+            )
             # 如果加载失败，使用默认关键词
             default_keywords = {
                 "转人工", "人工客服", "真人", "客服", "人工", "工单", "好评",
@@ -36,12 +40,16 @@ class KeywordDetectionHandler(BaseHandler):
                 "退款", "没有效果", "骗人", "投诉", "纠纷", "开发票", "开票",
                 "烂", "取消", "备注"
             }
-            self.logger.warning(f"使用默认关键词: {default_keywords}")
+            self.logger.warning(
+                f"using default keywords: count={len(default_keywords)}"
+            )
             return default_keywords
 
     def can_handle(self, context: Context) -> bool:
         """检查消息是否包含关键词"""
         # 只处理文本类型的消息
+        if not self._within_business_hours():
+            return False
         if context.type != ContextType.TEXT:
             return False
 
@@ -55,7 +63,9 @@ class KeywordDetectionHandler(BaseHandler):
         # 检查是否包含任何关键词
         for keyword in self.keywords:
             if keyword in content_lower:
-                self.logger.debug(f"检测到关键词: '{keyword}' 在消息: '{context.content}'")
+                self.logger.debug(
+                    f"keyword detected: {keyword!r}, message_length={len(context.content)}"
+                )
                 return True
 
         return False
@@ -106,7 +116,9 @@ class KeywordDetectionHandler(BaseHandler):
             return False
             
         except Exception as e:
-            self.logger.error(f"客服转接处理失败: {e}")
+            self.logger.error(
+                f"客服转接处理失败: error_type={type(e).__name__}"
+            )
             return False
             
     def reload_keywords(self) -> None:
@@ -123,3 +135,16 @@ class KeywordDetectionHandler(BaseHandler):
     def get_keywords(self) -> set:
         """获取当前关键词列表"""
         return self.keywords.copy()
+
+    def _within_business_hours(self) -> bool:
+        """Return whether manual-service routing is currently enabled."""
+        try:
+            start = time.fromisoformat(str(self.business_hours.get("start", "08:00")))
+            end = time.fromisoformat(str(self.business_hours.get("end", "23:00")))
+            current = datetime.now().time()
+            if start <= end:
+                return start <= current <= end
+            return current >= start or current <= end
+        except (TypeError, ValueError):
+            self.logger.warning("invalid business hours; manual routing disabled")
+            return False
